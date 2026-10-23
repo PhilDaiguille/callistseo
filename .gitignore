@@ -1,0 +1,10 @@
+/target
+node_modules
+.DS_Store
+dist
+# Secrets locaux (jeton, etc.) ; `.env.example` reste suivi.
+.env
+*.db
+*.db-wal
+*.db-shm
+/apps/desktop/src-tauri/gen

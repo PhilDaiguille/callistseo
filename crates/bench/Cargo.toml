@@ -1,0 +1,16 @@
+[package]
+name = "callistseo-bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Benchmarks reproductibles : site synthétique déterministe, débit, mémoire, latence, exactitude des règles"
+
+[dependencies]
+callistseo-core = { path = "../core" }
+callistseo-crawler = { path = "../crawler" }
+callistseo-seo-rules = { path = "../seo-rules" }
+callistseo-export = { path = "../export" }
+tokio.workspace = true
+url.workspace = true
+clap.workspace = true
+libc = "0.2.191"

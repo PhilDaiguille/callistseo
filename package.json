@@ -1,0 +1,11 @@
+{
+  "name": "callistseo",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "web": "pnpm --filter web",
+    "web:dev": "pnpm --filter web dev",
+    "web:build": "pnpm --filter web build",
+    "web:test": "pnpm --filter web test"
+  }
+}

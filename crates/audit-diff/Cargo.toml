@@ -1,0 +1,9 @@
+[package]
+name = "callistseo-audit-diff"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+callistseo-core = { path = "../core" }
+url.workspace = true

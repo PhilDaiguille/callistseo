@@ -1,0 +1,17 @@
+[package]
+name = "callistseo-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Serveur MCP (stdio) : lancer des audits et interroger leurs résultats depuis un assistant"
+
+[dependencies]
+callistseo-api = { path = "../api" }
+callistseo-seo-rules = { path = "../seo-rules" }
+tokio = { workspace = true, features = ["io-std"] }
+serde_json.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+callistseo-core = { path = "../core" }
+callistseo-storage = { path = "../storage" }

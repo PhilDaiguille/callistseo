@@ -1,0 +1,20 @@
+[package]
+name = "callistseo-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Application desktop CallistSEO (Tauri 2)"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+url.workspace = true
+callistseo-api = { path = "../../../crates/api" }
+callistseo-storage = { path = "../../../crates/storage" }
+
+[features]
+# Activé par `tauri build` : l'interface est embarquée au lieu d'être servie par `devUrl`.
+custom-protocol = ["tauri/custom-protocol"]

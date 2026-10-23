@@ -1,0 +1,31 @@
+[package]
+name = "callistseo-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "callistseo"
+path = "src/main.rs"
+
+[dependencies]
+callistseo-core = { path = "../core" }
+callistseo-crawler = { path = "../crawler" }
+callistseo-seo-rules = { path = "../seo-rules" }
+callistseo-storage = { path = "../storage" }
+callistseo-audit-diff = { path = "../audit-diff" }
+callistseo-export = { path = "../export" }
+callistseo-api = { path = "../api" }
+callistseo-mcp = { path = "../mcp" }
+url.workspace = true
+tokio.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+mimalloc = { version = "0.1.52", optional = true }
+dhat = { version = "0.3.3", optional = true }
+
+[features]
+mimalloc = ["dep:mimalloc"]
+# Profil du tas (dhat) : `cargo build --release --features dhat-heap`, écrit dhat-heap.json à la sortie.
+dhat-heap = ["dep:dhat"]
+dhat = ["dep:dhat"]

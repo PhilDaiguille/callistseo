@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+# L'application desktop exige que l'interface soit construite (apps/web/dist) : elle n'est pas
+# compilée par défaut. `cargo build -p callistseo-desktop` (ou `pnpm --filter desktop build`).
+default-members = ["crates/*"]
+members = ["crates/core", "crates/crawler", "crates/seo-rules", "crates/storage", "crates/audit-diff", "crates/export", "crates/api", "crates/mcp", "crates/bench", "apps/desktop/src-tauri", "crates/cli"]
+
+# Binaire de production : liens-temps optimisés, un seul module de génération de code, symboles
+# retirés. Pas de `panic = "abort"` : un panic dans une tâche d'audit ne doit pas tuer le serveur.
+# Pour profiler (dhat, flamegraph) : CARGO_PROFILE_RELEASE_STRIP=false CARGO_PROFILE_RELEASE_DEBUG=1.
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+url = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "gzip", "brotli", "deflate"] }
+scraper = "0.20"
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }

@@ -1,0 +1,295 @@
+use callistseo_core::CrawlConfig;
+use reqwest::dns::{Addrs, Name, Resolve, Resolving};
+use reqwest::redirect::Policy;
+use std::error::Error;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
+use std::time::Duration;
+use url::{Host, Url};
+
+/// Adresses vers lesquelles un crawler ne doit jamais se connecter (SSRF).
+pub fn is_forbidden(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v) => {
+            let o = v.octets();
+            v.is_loopback()
+                || v.is_private()
+                || v.is_link_local()
+                || v.is_multicast()
+                || o[0] == 0 // 0.0.0.0/8
+                || (o[0] == 100 && (o[1] & 0xc0) == 64) // CGNAT 100.64/10
+                || (o[0] == 192 && o[1] == 0 && o[2] == 0) // 192.0.0.0/24
+                || (o[0] == 198 && (o[1] & 0xfe) == 18) // benchmark 198.18/15
+                || o[0] >= 240 // réservé + broadcast
+        }
+        IpAddr::V6(v) => {
+            if let Some(m) = v.to_ipv4_mapped() {
+                return is_forbidden(IpAddr::V4(m));
+            }
+            let s = v.segments();
+            v.is_loopback()
+                || v.is_unspecified()
+                || v.is_multicast()
+                || (s[0] & 0xfe00) == 0xfc00 // unique local
+                || (s[0] & 0xffc0) == 0xfe80 // link-local
+                || (s[0] == 0x64 && s[1] == 0xff9b) // NAT64 : peut viser de l'IPv4 interne
+        }
+    }
+}
+
+/// Résolveur DNS qui filtre les IP interdites. reqwest se connecte uniquement aux
+/// adresses renvoyées ici : pas de fenêtre de DNS rebinding entre vérification et connexion.
+struct SafeResolver;
+
+impl Resolve for SafeResolver {
+    fn resolve(&self, name: Name) -> Resolving {
+        Box::pin(async move {
+            let addrs: Vec<SocketAddr> = tokio::net::lookup_host((name.as_str(), 0))
+                .await?
+                .filter(|a| !is_forbidden(a.ip()))
+                .collect();
+            if addrs.is_empty() {
+                return Err("destination interdite (IP privée ou réservée)".into());
+            }
+            Ok(Box::new(addrs.into_iter()) as Addrs)
+        })
+    }
+}
+
+pub struct Fetched {
+    pub status: u16,
+    pub location: Option<String>,
+    /// `Retry-After` en secondes (la forme « date HTTP » est ignorée).
+    pub retry_after: Option<Duration>,
+    /// Corps HTML (tronqué à `max_body_bytes`) ; `None` si la réponse n'est pas du HTML 2xx.
+    pub html: Option<Vec<u8>>,
+    /// Délai jusqu'aux en-têtes, puis jusqu'à la fin du corps.
+    pub ttfb: Duration,
+    pub total: Duration,
+    /// Octets du corps lu (HTML) ou `Content-Length` annoncé.
+    pub size: Option<u64>,
+    pub content_type: Option<String>,
+    /// En-têtes de `RECORDED_HEADERS`.
+    pub headers: Vec<(String, String)>,
+}
+
+pub struct Client {
+    http: reqwest::Client,
+    max_body: usize,
+    allow_private: bool,
+}
+
+/// Un user-agent vide, trop long ou avec des caractères de contrôle/non ASCII est refusé
+/// (en-tête HTTP invalide, ou identifiant inexploitable pour un administrateur).
+pub fn validate_user_agent(ua: &str) -> Result<(), String> {
+    if ua.trim().is_empty()
+        || ua.len() > 200
+        || !ua.chars().all(|c| c == ' ' || c.is_ascii_graphic())
+    {
+        return Err("user-agent invalide : 1 à 200 caractères ASCII imprimables".into());
+    }
+    Ok(())
+}
+
+impl Client {
+    pub fn new(cfg: &CrawlConfig) -> Result<Self, String> {
+        validate_user_agent(&cfg.user_agent)?;
+        // Redirections gérées par le crawler (chaque saut est une URL revalidée) ;
+        // `no_proxy` pour qu'un proxy système ne contourne pas le filtre DNS.
+        let mut b = reqwest::Client::builder()
+            .redirect(Policy::none())
+            .no_proxy()
+            .timeout(cfg.timeout)
+            .user_agent(&cfg.user_agent);
+        if !cfg.allow_private {
+            b = b.dns_resolver(Arc::new(SafeResolver));
+        }
+        Ok(Self {
+            http: b.build().map_err(|e| e.to_string())?,
+            max_body: cfg.max_body_bytes,
+            allow_private: cfg.allow_private,
+        })
+    }
+
+    /// Les IP littérales ne passent pas par le résolveur : on les vérifie ici.
+    fn check(&self, url: &Url) -> Result<(), String> {
+        if self.allow_private {
+            return Ok(());
+        }
+        let ip = match url.host() {
+            Some(Host::Ipv4(ip)) => Some(IpAddr::V4(ip)),
+            Some(Host::Ipv6(ip)) => Some(IpAddr::V6(ip)),
+            _ => None,
+        };
+        if ip.is_some_and(is_forbidden) {
+            return Err("destination interdite (IP privée ou réservée)".into());
+        }
+        Ok(())
+    }
+
+    /// robots.txt de l'origine ; `None` si absent ou en erreur (= tout autorisé).
+    // ponytail: Google traite un 5xx comme « tout interdit » ; ici on autorise.
+    pub async fn robots_txt(&self, origin: &Url) -> Option<String> {
+        self.get_text(&origin.join("/robots.txt").ok()?, 512 * 1024)
+            .await
+    }
+
+    /// Corps texte d'une réponse 2xx (tronqué à `max` octets) ; `None` sinon.
+    pub async fn get_text(&self, url: &Url, max: usize) -> Option<String> {
+        self.check(url).ok()?;
+        let mut resp = self.http.get(url.clone()).send().await.ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        let mut buf = Vec::new();
+        while let Some(c) = resp.chunk().await.ok()? {
+            buf.extend_from_slice(&c);
+            if buf.len() >= max {
+                buf.truncate(max);
+                break;
+            }
+        }
+        Some(String::from_utf8_lossy(&gunzip_if_needed(buf, max)).into_owned())
+    }
+
+    pub async fn fetch(&self, url: &Url) -> Result<Fetched, String> {
+        self.check(url)?;
+        let started = std::time::Instant::now();
+        let mut resp = self.http.get(url.clone()).send().await.map_err(chain)?;
+        let ttfb = started.elapsed();
+        let status = resp.status().as_u16();
+        let headers: Vec<(String, String)> = callistseo_core::RECORDED_HEADERS
+            .iter()
+            .filter_map(|name| {
+                let v = resp.headers().get(*name)?.to_str().ok()?;
+                Some(((*name).to_owned(), v.chars().take(300).collect()))
+            })
+            .collect();
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.chars().take(100).collect::<String>());
+        let content_length = resp.content_length();
+        let location = resp
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let retry_after = resp
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map(Duration::from_secs);
+        let is_html = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.contains("html"));
+        let html = if is_html && resp.status().is_success() {
+            let mut buf = Vec::new();
+            while let Some(chunk) = resp.chunk().await.map_err(chain)? {
+                buf.extend_from_slice(&chunk);
+                if buf.len() >= self.max_body {
+                    buf.truncate(self.max_body);
+                    break;
+                }
+            }
+            Some(buf)
+        } else {
+            None
+        };
+        let size = html.as_ref().map(|b| b.len() as u64).or(content_length);
+        Ok(Fetched {
+            status,
+            location,
+            retry_after,
+            html,
+            ttfb,
+            total: started.elapsed(),
+            size,
+            content_type,
+            headers,
+        })
+    }
+}
+
+/// Décompresse un corps gzip (détecté par ses octets magiques, ex. `sitemap.xml.gz`).
+/// La sortie est plafonnée à `max` octets : une « bombe » gzip ne peut pas saturer la mémoire.
+fn gunzip_if_needed(buf: Vec<u8>, max: usize) -> Vec<u8> {
+    use std::io::Read;
+    if !buf.starts_with(&[0x1f, 0x8b]) {
+        return buf;
+    }
+    let mut out = Vec::new();
+    // Une archive corrompue renvoie ce qui a été lu avant l'erreur.
+    let _ = flate2::read::GzDecoder::new(&buf[..])
+        .take(max as u64)
+        .read_to_end(&mut out);
+    out
+}
+
+fn chain(e: reqwest::Error) -> String {
+    let mut msg = e.to_string();
+    let mut src = e.source();
+    while let Some(s) = src {
+        msg.push_str(": ");
+        msg.push_str(&s.to_string());
+        src = s.source();
+    }
+    msg
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_agent_validation() {
+        assert!(validate_user_agent("CallistSEO/0.1 (+https://exemple.fr/bot)").is_ok());
+        for bad in ["", "   ", "é", "a\r\nX-Evil: 1", "a\tb", &"x".repeat(201)] {
+            assert!(validate_user_agent(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn gunzip_roundtrip_plain_and_bomb() {
+        use flate2::{write::GzEncoder, Compression};
+        use std::io::Write;
+        let gz = |data: &[u8]| {
+            let mut e = GzEncoder::new(Vec::new(), Compression::default());
+            e.write_all(data).unwrap();
+            e.finish().unwrap()
+        };
+        assert_eq!(gunzip_if_needed(gz(b"<urlset/>"), 1000), b"<urlset/>");
+        assert_eq!(gunzip_if_needed(b"<urlset/>".to_vec(), 1000), b"<urlset/>");
+        let bomb = gz(&vec![b'a'; 5_000_000]);
+        assert!(bomb.len() < 10_000);
+        assert_eq!(gunzip_if_needed(bomb, 1000).len(), 1000);
+    }
+
+    #[test]
+    fn forbidden_ips() {
+        for ip in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "172.16.0.1",
+            "192.168.1.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "0.0.0.0",
+            "255.255.255.255",
+            "::1",
+            "fc00::1",
+            "fe80::1",
+            "::ffff:127.0.0.1",
+            "64:ff9b::7f00:1",
+        ] {
+            assert!(is_forbidden(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in ["93.184.216.34", "8.8.8.8", "2606:4700::1111"] {
+            assert!(!is_forbidden(ip.parse().unwrap()), "{ip}");
+        }
+    }
+}

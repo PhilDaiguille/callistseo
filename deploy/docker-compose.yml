@@ -1,0 +1,31 @@
+# Version web auto-hébergée : `cp .env.example .env`, définir CALLISTSEO_TOKEN, puis
+#   docker compose up -d --build        (depuis le dossier deploy/)
+name: callistseo
+
+services:
+  callistseo:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: callistseo:local
+    restart: unless-stopped
+    ports:
+      # Local par défaut. Pour exposer le service, placez-le derrière un proxy HTTPS (le jeton
+      # circule en clair sur HTTP) plutôt que de changer CALLISTSEO_BIND.
+      - "${CALLISTSEO_BIND:-127.0.0.1}:${CALLISTSEO_PORT:-8080}:8080"
+    environment:
+      # Facultatif : identifiant du robot, avec votre URL de contact (voir .env.example).
+      CALLISTSEO_USER_AGENT: ${CALLISTSEO_USER_AGENT:-}
+      CALLISTSEO_TOKEN: ${CALLISTSEO_TOKEN:?Définissez CALLISTSEO_TOKEN (16 caractères minimum), voir .env.example}
+    volumes:
+      - callistseo-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  callistseo-data:

@@ -1,0 +1,173 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/nunito";
+@import "@fontsource-variable/inter";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ------------------------------------------------------------------------------------------
+   Système de design CallistSEO — voir docs/design.md
+   Hiérarchie : FORT (contour encre 2 px + ombre décalée) pour les actions et champs ;
+   LÉGER (contour fin `--line`) pour les panneaux, tableaux et badges ; NEUTRE (aucun contour).
+   ------------------------------------------------------------------------------------------ */
+
+@theme inline {
+    --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+    --font-heading: 'Nunito Variable', ui-rounded, 'Inter Variable', system-ui, sans-serif;
+
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-destructive: var(--destructive);
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+
+    /* Jetons propres à CallistSEO */
+    --color-ink: var(--ink);
+    --color-line: var(--line);
+    --color-success: var(--success);
+    --color-success-soft: var(--success-soft);
+    --color-warning-soft: var(--warning-soft);
+    --color-info-soft: var(--info-soft);
+    --color-destructive-soft: var(--destructive-soft);
+
+    --shadow-pop: 3px 3px 0 0 var(--shadow-color);
+    --shadow-pop-sm: 2px 2px 0 0 var(--shadow-color);
+
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.15);
+    --radius-2xl: calc(var(--radius) * 1.45);
+    --radius-3xl: calc(var(--radius) * 1.8);
+    --radius-4xl: calc(var(--radius) * 2.2);
+}
+
+:root {
+    --radius: 0.875rem;
+
+    --background: #FAF7EF;        /* crème */
+    --foreground: #1D1C19;        /* encre */
+    --card: #FFFDF8;
+    --card-foreground: #1D1C19;
+    --popover: #FFFDF8;
+    --popover-foreground: #1D1C19;
+    --primary: #C5CEEE;           /* lavande : l'action principale de l'écran */
+    --primary-foreground: #1D1C19;
+    --secondary: #E8E2D6;         /* sable */
+    --secondary-foreground: #1D1C19;
+    --muted: #EFEADF;
+    --muted-foreground: #6A6457;
+    --accent: #E8E5F2;            /* lilas clair : survol, sélection */
+    --accent-foreground: #1D1C19;
+    --destructive: #B3261E;
+    --border: var(--line);
+    --input: #1D1C19;
+    --ring: #6E7BD0;
+
+    --ink: #1D1C19;               /* contour fort */
+    --line: rgb(29 28 25 / 0.16); /* contour léger */
+    --shadow-color: #1D1C19;
+    --success: #83A58B;           /* vert doux */
+    --success-soft: #DDEBE0;
+    --warning-soft: #F7E7BC;
+    --info-soft: #E8E5F2;
+    --destructive-soft: #F9DCD8;
+}
+
+.dark {
+    --background: #1B1A17;
+    --foreground: #F3EFE4;
+    --card: #25231F;
+    --card-foreground: #F3EFE4;
+    --popover: #25231F;
+    --popover-foreground: #F3EFE4;
+    --primary: #C5CEEE;
+    --primary-foreground: #1D1C19;
+    --secondary: #34312B;
+    --secondary-foreground: #F3EFE4;
+    --muted: #2B2823;
+    --muted-foreground: #A9A394;
+    --accent: #3A3650;
+    --accent-foreground: #F3EFE4;
+    --destructive: #FF8A80;
+    --border: var(--line);
+    --input: #EDE7D8;
+    --ring: #C5CEEE;
+
+    --ink: #EDE7D8;
+    --line: rgb(243 239 228 / 0.16);
+    --shadow-color: #6F78A8;      /* une ombre noire serait invisible sur fond sombre */
+    --success: #83A58B;
+    --success-soft: #1F3A2A;
+    --warning-soft: #4A3A12;
+    --info-soft: #3A3650;
+    --destructive-soft: #4A1F1C;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    /* Petits points discrets : de la profondeur sans distraire (les panneaux restent unis). */
+    background-image: radial-gradient(color-mix(in oklab, var(--foreground) 9%, transparent) 1px, transparent 1px);
+    background-size: 18px 18px;
+  }
+  html {
+    @apply font-sans;
+  }
+  h1, h2, h3 {
+    font-family: var(--font-heading);
+    @apply tracking-tight;
+  }
+  /* Une grille sans colonnes explicites ne doit pas s'élargir au contenu le plus large (onglets,
+     tableaux) : sinon la page déborde sur mobile. Les `grid-cols-*` (couche utilities) l'emportent. */
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :focus-visible {
+    outline: 3px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Niveau LÉGER : panneaux, tableaux, listes. */
+  .panel {
+    @apply rounded-2xl border border-line bg-card text-card-foreground;
+  }
+  /* Panneau qui contient un tableau (le composant Table gère déjà son défilement horizontal). */
+  .table-panel {
+    @apply overflow-hidden rounded-2xl border border-line bg-card text-card-foreground;
+  }
+  /* Niveau FORT : cartes mises en avant (ex. projets). */
+  .panel-pop {
+    @apply rounded-2xl border-2 border-ink bg-card text-card-foreground shadow-pop-sm;
+  }
+  /* Champs natifs (<select>) alignés sur le composant Input. */
+  .field {
+    @apply h-10 rounded-xl border-2 border-ink bg-card px-3 text-sm text-foreground;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
