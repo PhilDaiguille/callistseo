@@ -20,6 +20,8 @@ pub struct CrawlStats {
     pub limit: AtomicUsize,
     /// URL découvertes en attente d'être visitées.
     pub queued: AtomicUsize,
+    /// Limite de pages de l'audit (plafond de la barre de progression).
+    pub max_pages: AtomicUsize,
     /// Latence moyenne lissée, en microsecondes.
     pub avg_latency_us: AtomicU64,
     /// Requêtes en échec (erreur réseau, 429, 5xx).
@@ -38,6 +40,7 @@ impl Default for CrawlStats {
             in_flight: AtomicUsize::new(0),
             limit: AtomicUsize::new(0),
             queued: AtomicUsize::new(0),
+            max_pages: AtomicUsize::new(0),
             avg_latency_us: AtomicU64::new(0),
             failures: AtomicUsize::new(0),
             paused: AtomicBool::new(false),

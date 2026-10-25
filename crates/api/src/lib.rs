@@ -507,6 +507,7 @@ fn run_json(r: &RunInfo, live: Option<&CrawlStats>) -> Value {
             "in_flight": l.in_flight.load(Ordering::Relaxed),
             "concurrency": l.limit.load(Ordering::Relaxed),
             "queued": l.queued.load(Ordering::Relaxed),
+            "max_pages": l.max_pages.load(Ordering::Relaxed),
             "urls_per_second": (l.urls_per_second() * 10.0).round() / 10.0,
             "avg_latency_ms": l.avg_latency().as_millis() as u64,
             "failures": l.failures.load(Ordering::Relaxed),

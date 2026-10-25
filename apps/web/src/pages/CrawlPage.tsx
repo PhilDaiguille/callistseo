@@ -5,6 +5,7 @@ import { RunBadge } from '@/components/Badges'
 import { PageSkeleton } from '@/components/Skeleton'
 import { EmptyState } from '@/components/EmptyState'
 import { QueryError } from '@/components/QueryError'
+import { RunProgress } from '@/components/RunProgress'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api, downloadExport, downloadSitemap } from '@/lib/api'
@@ -176,8 +177,8 @@ export function CrawlPage() {
 
       {running ? (
         <EmptyState mood="normal" working>
-          {c.live?.paused ? 'Audit en pause' : c.live?.stopping ? 'Arrêt en cours…' : 'Audit en cours'} : {c.pages} URL explorées.
-          Les résultats apparaîtront à la fin.
+          {c.live?.paused ? 'Audit en pause' : c.live?.stopping ? 'Arrêt en cours…' : 'Audit en cours'}. Les résultats apparaîtront à la fin.
+          <RunProgress pages={c.pages} live={c.live} />
           {c.live && (
             <span className="mt-1 block text-sm text-muted-foreground">
               {c.live.urls_per_second.toFixed(1)} URL/s · file {c.live.queued} · {Math.round(c.live.avg_latency_ms)} ms · concurrence{' '}

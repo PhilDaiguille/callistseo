@@ -5,7 +5,7 @@ export function QueryError({ error }: { error: unknown }) {
   const message = error instanceof Error ? error.message : String(error)
   const hint =
     error instanceof ApiError && error.status === 401
-      ? ' — renseignez le jeton d’accès (bouton « Jeton » en haut à droite).'
+      ? ' — connectez-vous avec le mot de passe de l’équipe (page /login).'
       : error instanceof TypeError
         ? ' — l’API est-elle lancée ? (callistseo serve --db audits.db)'
         : ''

@@ -25,7 +25,7 @@ export const RULES: Record<string, RuleInfo> = {
   noindex: { label: 'Noindex', help: 'La page demande à ne pas être indexée (meta robots). Vérifiez que c’est voulu.' },
   'noindex-canonical': { label: 'Noindex et canonical', help: 'La page est en noindex tout en désignant une autre URL canonique : directives potentiellement contradictoires.' },
   'canonical-target': { label: 'Canonical problématique', help: 'La canonical pointe vers une URL redirigée ou en erreur.' },
-  'broken-link': { label: 'Lien interne cassé', help: 'Cette page contient un lien vers une URL qui répond en erreur.' },
+  'broken-link': { label: 'Lien interne cassé', help: 'Cette page contient un lien vers une URL qui répond en erreur (4xx/5xx). Un délai dépassé n\'est pas compté ici : il est signalé sur la page elle-même (Erreur réseau).' },
   'query-explosion': { label: 'Explosion de paramètres', help: 'Un même chemin existe en très nombreuses variantes de paramètres : risque de gaspillage de crawl.' },
   'sitemap-url-error': { label: 'Sitemap : URL inaccessible', help: 'Une URL listée dans le sitemap est en erreur.' },
   'sitemap-url-redirect': { label: 'Sitemap : URL redirigée', help: 'Une URL listée dans le sitemap redirige : le sitemap devrait contenir les URL finales.' },

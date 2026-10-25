@@ -116,6 +116,7 @@ pub async fn crawl_observed(
         Controller::new(cfg.concurrency, cfg.concurrency)
     };
     stats.limit.store(ctl.limit(), Ordering::Relaxed);
+    stats.max_pages.store(cfg.max_pages, Ordering::Relaxed);
     let mut next_slot = Instant::now();
     let mut retries: HashMap<Url, u32> = HashMap::new();
     // Une seule allocation par URL distincte, partagée par `seen`, la file et les liens des pages.

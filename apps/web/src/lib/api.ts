@@ -1,5 +1,5 @@
 // Client typé de l'API (voir README) : HTTP via `callistseo serve`, ou en processus dans l'application desktop.
-import { apiFetch, saveDownload } from './transport'
+import { apiFetch, isDesktop, saveDownload } from './transport'
 
 export type RunStatus = 'running' | 'done' | 'failed' | 'cancelled'
 export type Severity = 'Error' | 'Warning' | 'Info'
@@ -33,6 +33,8 @@ export interface LiveStats {
   in_flight: number
   concurrency: number
   queued: number
+  /** Limite de pages de l'audit (0 : inconnue). */
+  max_pages: number
   urls_per_second: number
   avg_latency_ms: number
   failures: number
@@ -261,22 +263,35 @@ export class ApiError extends Error {
 
 const TOKEN_KEY = 'callistseo.token'
 
-// Jeton gardé pour l'onglet seulement (sessionStorage) ; l'app fonctionne sans.
+// Mot de passe de l'équipe (= jeton du serveur) : pour l'onglet (sessionStorage) ou, avec
+// « Se souvenir de moi », pour ce poste (localStorage). L'app fonctionne sans.
 export function getToken(): string {
   try {
-    return sessionStorage.getItem(TOKEN_KEY) ?? ''
+    return localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY) ?? ''
   } catch {
     return ''
   }
 }
 
-export function setToken(token: string): void {
+export function setToken(token: string, remember = false): void {
   try {
-    if (token) sessionStorage.setItem(TOKEN_KEY, token)
-    else sessionStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(TOKEN_KEY)
+    sessionStorage.removeItem(TOKEN_KEY)
+    if (token) (remember ? localStorage : sessionStorage).setItem(TOKEN_KEY, token)
   } catch {
     // stockage indisponible (navigation privée, etc.) : le jeton reste simplement non mémorisé
   }
+}
+
+/** Adresse de retour après connexion : chemin interne uniquement (pas de redirection ouverte). */
+export function safeNext(next: string | null): string {
+  return next && next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\') ? next : '/'
+}
+
+/** Page de connexion à ouvrir après un 401, ou `null` si on y est déjà. */
+export function loginPath(pathname: string, search: string): string | null {
+  if (pathname === '/login') return null
+  return `/login?next=${encodeURIComponent(pathname + search)}`
 }
 
 /** Chaîne de requête sans les valeurs vides. */
@@ -297,6 +312,11 @@ function authHeaders(): Headers {
 }
 
 async function fail(res: Response): Promise<never> {
+  // Accès refusé : direction la page de connexion (jamais en desktop, qui n'a pas de jeton).
+  if (res.status === 401 && !isDesktop) {
+    const to = loginPath(window.location.pathname, window.location.search)
+    if (to) window.location.assign(to)
+  }
   const body = (await res.json().catch(() => null)) as { error?: string } | null
   throw new ApiError(res.status, body?.error ?? `Erreur HTTP ${res.status}`)
 }

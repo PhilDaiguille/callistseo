@@ -91,6 +91,11 @@ pub fn analyze(pages: &[CrawledPage], cfg: &RulesConfig) -> Vec<Issue> {
         match p.status {
             Some(s) if s >= 400 => add("http-error", &p.url, format!("statut HTTP {s}")),
             Some(s) if (300..400).contains(&s) => match redirect_hops(p, &by_url) {
+                Hops::Loop if p.redirect_to.as_ref() == Some(&p.url) => add(
+                    "redirect-loop",
+                    &p.url,
+                    "redirige vers elle-même : souvent un cookie exigé par le serveur (un navigateur le garde, pas le robot)".into(),
+                ),
                 Hops::Loop => add("redirect-loop", &p.url, "boucle de redirections".into()),
                 Hops::Chain(n) if n >= 2 => add(
                     "redirect-chain",
@@ -166,10 +171,9 @@ pub fn analyze(pages: &[CrawledPage], cfg: &RulesConfig) -> Vec<Issue> {
         // Liens internes cassés
         for l in &p.links {
             if let Some(t) = by_url.get(&**l) {
-                let broken = t.status.is_some_and(|s| s >= 400)
-                    || (t.status.is_none()
-                        && t.error.as_deref().is_some_and(|e| e != ROBOTS_BLOCKED));
-                if broken {
+                // Une cible sans réponse (délai dépassé, réseau) n'est pas « cassée » : `network-error`
+                // la signale déjà une fois sur la page elle-même, au lieu d'une fois par lien qui y mène.
+                if t.status.is_some_and(|s| s >= 400) {
                     add("broken-link", &p.url, format!("lien cassé vers {l}"));
                 }
             }
@@ -377,6 +381,32 @@ mod tests {
         let mut home = page("/", 200);
         home.links = vec![Arc::new(u("/a"))];
         assert!(rules(&[home, page("/a", 200)]).is_empty());
+    }
+
+    #[test]
+    fn unreachable_targets_are_not_broken_links() {
+        let mut home = page("/", 200);
+        home.links = vec![Arc::new(u("/slow")), Arc::new(u("/gone"))];
+        let mut slow = page("/slow", 200);
+        slow.status = None;
+        slow.is_html = false;
+        slow.error = Some("operation timed out".into());
+        let r = rules(&[home, slow, page("/gone", 404)]);
+        // Une seule erreur de lien : celle vers la page en 404 ; le délai dépassé reste `network-error`.
+        assert_eq!(r.iter().filter(|x| x.0 == "broken-link").count(), 1);
+        assert!(r.contains(&("network-error", "/slow".into())));
+    }
+
+    #[test]
+    fn self_redirect_is_explained() {
+        let mut a = page("/a", 301);
+        a.redirect_to = Some(u("/a"));
+        let found: Vec<_> = analyze(&[a], &RulesConfig::default())
+            .into_iter()
+            .filter(|i| i.rule == "redirect-loop")
+            .collect();
+        assert_eq!(found.len(), 1);
+        assert!(found[0].message.contains("cookie"), "{}", found[0].message);
     }
 
     #[test]

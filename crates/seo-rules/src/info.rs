@@ -51,7 +51,7 @@ pub const RULES: &[RuleInfo] = &[
     r("noindex", Severity::Info, "Noindex", "La page demande à ne pas être indexée (meta robots). Vérifiez que c'est voulu."),
     r("noindex-canonical", Severity::Warning, "Noindex et canonical", "La page est en noindex tout en désignant une autre URL canonique : directives potentiellement contradictoires."),
     r("canonical-target", Severity::Warning, "Canonical problématique", "La canonical pointe vers une URL redirigée ou en erreur."),
-    r("broken-link", Severity::Error, "Lien interne cassé", "Cette page contient un lien vers une URL qui répond en erreur."),
+    r("broken-link", Severity::Error, "Lien interne cassé", "Cette page contient un lien vers une URL qui répond en erreur (4xx/5xx). Un délai dépassé n'est pas compté ici : il est signalé sur la page elle-même (Erreur réseau)."),
     r("query-explosion", Severity::Warning, "Explosion de paramètres", "Un même chemin existe en très nombreuses variantes de paramètres : risque de gaspillage de crawl."),
     r("sitemap-url-error", Severity::Error, "Sitemap : URL inaccessible", "Une URL listée dans le sitemap est en erreur."),
     r("sitemap-url-redirect", Severity::Warning, "Sitemap : URL redirigée", "Une URL listée dans le sitemap redirige : le sitemap devrait contenir les URL finales."),

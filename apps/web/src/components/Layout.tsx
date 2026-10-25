@@ -1,54 +1,32 @@
 import { useState } from 'react'
-import { Link, NavLink, Outlet, useMatch } from 'react-router-dom'
-import { Monitor, Moon, Sun } from 'lucide-react'
+import { Link, NavLink, Outlet, useMatch, useNavigate } from 'react-router-dom'
+import { LogOut, Monitor, Moon, Sun } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Mascot } from '@/components/Mascot'
 import { getToken, setToken } from '@/lib/api'
 import { applyTheme, loadPreference, nextPreference, savePreference, type ThemePreference } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { isDesktop } from '@/lib/transport'
 
-function TokenControl() {
+/** Visible seulement une fois connecté (un serveur sans jeton n'a pas de connexion). */
+function LogoutButton() {
   const queryClient = useQueryClient()
-  const [open, setOpen] = useState(false)
-  const [value, setValue] = useState(getToken())
-
-  const save = () => {
-    setToken(value.trim())
-    setOpen(false)
-    void queryClient.invalidateQueries()
-  }
-
-  if (!open) {
-    return (
-      <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
-        Jeton{getToken() ? ' ✓' : ''}
-      </Button>
-    )
-  }
+  const navigate = useNavigate()
+  if (!getToken()) return null
   return (
-    <form
-      className="flex items-center gap-2"
-      onSubmit={(e) => {
-        e.preventDefault()
-        save()
+    <Button
+      variant="secondary"
+      size="sm"
+      onClick={() => {
+        setToken('')
+        queryClient.clear()
+        navigate('/login')
       }}
     >
-      <Input
-        type="password"
-        autoFocus
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="Jeton d'accès (vide = aucun)"
-        aria-label="Jeton d'accès"
-        className="w-56"
-      />
-      <Button size="sm" type="submit">
-        Enregistrer
-      </Button>
-    </form>
+      <LogOut aria-hidden />
+      Se déconnecter
+    </Button>
   )
 }
 
@@ -110,8 +88,8 @@ export function Layout() {
           </nav>
           <div className="ml-auto flex items-center gap-2">
             <ThemeToggle />
-            {/* En desktop l'API n'écoute sur aucun port : pas de jeton à saisir. */}
-            {!isDesktop && <TokenControl />}
+            {/* En desktop l'API n'écoute sur aucun port : pas de connexion. */}
+            {!isDesktop && <LogoutButton />}
           </div>
         </div>
       </header>

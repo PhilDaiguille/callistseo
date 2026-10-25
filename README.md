@@ -2,6 +2,11 @@
 
 Alternative open source (MIT) aux outils d'audit SEO payants : moteur de crawl en Rust, local-first, auto-hébergeable.
 Nom de travail : disponibilité juridique/domaine à vérifier avant publication.
+Code source : <https://github.com/PhilDaiguille/callistseo> · Licence : [MIT](LICENSE)
+
+```
+git clone git@github.com:PhilDaiguille/callistseo.git && cd callistseo
+```
 
 ## État
 
@@ -57,7 +62,22 @@ cargo run -p callistseo-cli -- serve --db audits.db   # API sur 127.0.0.1:8080
 pnpm install && pnpm web:dev                          # interface sur http://127.0.0.1:5173 (proxy /api -> 8080)
 ```
 
-Projets, lancement et suivi d'audits, explorateur d'URL (recherche, filtre de statut, détail), centre de problèmes par règle, exports. Si l'API est protégée par un jeton, le bouton « Jeton » en haut à droite le mémorise pour l'onglet.
+Projets, lancement et suivi d'audits, explorateur d'URL (recherche, filtre de statut, détail), centre de problèmes par règle, exports.
+
+### Accès d'équipe
+
+Une entreprise installe CallistSEO une fois et toute l'équipe partage **un même accès** : le jeton du serveur (`--token` / `CALLISTSEO_TOKEN`) sert de mot de passe d'équipe. Choisissez-en un long (16 caractères minimum, ex. `openssl rand -hex 16`) et transmettez-le à l'équipe.
+
+- Toute page de l'interface renvoie vers `/login` si l'accès manque ou est refusé, puis revient à la page demandée.
+- « Se souvenir de moi » garde l'accès sur ce poste (`localStorage`) ; sinon il est oublié à la fermeture de l'onglet. « Se déconnecter » l'efface.
+- Changer le mot de passe = redémarrer le serveur avec un nouveau jeton : tout le monde est déconnecté.
+- Sans `--token` (usage local) et dans l'application desktop, il n'y a pas d'écran de connexion.
+
+Pas de comptes nominatifs (on ne sait pas qui a fait quoi, on ne retire pas l'accès d'une seule personne) : à ajouter si le besoin apparaît.
+
+## Site vitrine
+
+`site/index.html` est la page publique du projet : un seul fichier, polices embarquées, aucun script ni ressource externe, publiable tel quel (GitHub Pages, n'importe quel hébergement statique). Aperçu : `python3 -m http.server -d site`. Elle reprend les couleurs de `apps/web/src/index.css` : à garder synchronisées à la main. Les boutons « Se connecter » pointent vers `http://127.0.0.1:8080/login` (instance Docker locale) : remplacer cette adresse par celle de votre instance avant publication.
 
 ## Version web (Docker Compose)
 
@@ -69,7 +89,7 @@ cp .env.example .env            # puis renseigner CALLISTSEO_TOKEN (openssl rand
 docker compose up -d --build    # interface et API sur http://127.0.0.1:8080
 ```
 
-- **Jeton obligatoire** : sans `CALLISTSEO_TOKEN` (16 caractères minimum), Compose refuse de démarrer et le serveur aussi. L'interface se charge sans jeton, mais l'API le demande : saisissez-le avec le bouton « Jeton ».
+- **Jeton obligatoire** : sans `CALLISTSEO_TOKEN` (16 caractères minimum), Compose refuse de démarrer et le serveur aussi. C'est le mot de passe de l'équipe, demandé par l'écran de connexion (voir « Accès d'équipe »).
 - **Local par défaut** : le port n'est publié que sur `127.0.0.1`. Pour l'exposer, placez le service derrière un proxy HTTPS : le jeton circule en clair sur HTTP.
 - **Durci** : utilisateur non-root, système de fichiers en lecture seule (sauf `/data`), aucune capacité Linux, `no-new-privileges`. Les destinations privées (dont les adresses internes du réseau Docker et les métadonnées cloud) sont refusées par le crawler.
 - **Sonde de santé** : `GET /api/health` (publique). Arrêt propre sur SIGTERM.
@@ -105,6 +125,8 @@ pnpm --filter desktop build    # bundle de l'application (macOS : .app / .dmg)
 ```
 
 Prérequis : Rust stable, Node, pnpm, et sous Linux les dépendances système de Tauri (webkit2gtk). L'application desktop n'est pas compilée par défaut (`cargo test` l'ignore) car elle exige l'interface construite.
+
+**Publier une version** : mettre la version dans `apps/desktop/src-tauri/tauri.conf.json`, puis pousser le tag correspondant (`git tag v0.1.0 && git push origin v0.1.0`). Le workflow `.github/workflows/release.yml` compile Windows (`.exe`, `.msi`), macOS (Apple Silicon et Intel, `.dmg`) et Linux (`.deb`, `.rpm`, `.AppImage`), et crée un **brouillon** de release avec ces fichiers : à relire, puis publier. Le workflow échoue si le tag ne correspond pas à la version. Les installateurs ne sont pas encore signés : Windows (SmartScreen) et macOS (Gatekeeper) afficheront un avertissement.
 
 ## Benchmarks
 

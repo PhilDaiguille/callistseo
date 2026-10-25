@@ -15,8 +15,9 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 | API | ✅ | projets (création, suppression), audits, rapports, segments, planification, configuration |
 | MCP (assistants IA) | ✅ | `callistseo mcp` : 13 outils (audits, rapports, comparaison, sitemap) ; reste : transport HTTP, ressources MCP |
 | Interface web | ✅ | poste de travail, palette ⌘K, thème clair/sombre, mobile |
-| Desktop (Tauri) | 🟡 | compile et fonctionne en processus ; fenêtre, Windows/Linux, signature à valider |
-| Docker / web | 🟡 | image durcie ; reste comptes, HTTPS, image publiée |
+| Desktop (Tauri) | 🟡 | compile et fonctionne en processus ; release sur tag `v*` (Windows, macOS, Linux, brouillon GitHub) ; fenêtre, essais Windows/Linux, signature à valider |
+| Docker / web | 🟡 | image durcie, connexion d'équipe (un mot de passe partagé, page `/login`) ; reste comptes nominatifs, HTTPS, image publiée |
+| Site vitrine | ✅ | `site/index.html` autonome ; reste : URL du dépôt et domaine définitifs, publication |
 | Performance et mémoire | ✅ | 49 Mo pour 6 000 pages denses, banc reproductible |
 | Intégrations externes | ⬜ | phase 6 |
 | Rendu JavaScript | ⏸ | phase 7 |
@@ -74,8 +75,8 @@ Rendu JavaScript (Chrome piloté + proxy appliquant le filtre anti-SSRF), JavaSc
 
 ### Distribution et projet
 
-- **Desktop** : validation visuelle de la fenêtre et des exports natifs, builds Windows / Linux (jamais exécutés en CI), signature / notarisation, icône définitive, mise à jour automatique.
-- **Docker / web** : comptes utilisateurs et séparation des données, HTTPS (proxy), image publiée, builds multi-architectures, journal d'accès, limitation de débit, CSP sur l'interface.
+- **Desktop** : validation visuelle de la fenêtre et des exports natifs, builds Windows / Linux (produits par `release.yml` sur tag, jamais lancés sur une vraie machine), signature / notarisation, icône définitive, mise à jour automatique.
+- **Docker / web** : comptes nominatifs et séparation des données (la connexion d'équipe par mot de passe partagé est faite), HTTPS (proxy), image publiée, builds multi-architectures, journal d'accès, limitation de débit, CSP sur l'interface.
 - **Projet** : nom, marque, domaine et dépôt à valider juridiquement ; SECURITY.md et CONTRIBUTING.md ; documentation d'installation ; validation terrain (5 testeurs) ; bêta.
 - **Qualité** : audit des règles sur davantage de vrais sites (faux positifs), `cargo deny`, corpus de fixtures (`tests/fixtures`), tests SSRF par redirection.
 
