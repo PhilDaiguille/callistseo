@@ -800,3 +800,42 @@ async fn external_links_are_checked_only_on_request_and_anchors_are_counted() {
     // 403 = non concluant, 200 = vivant : seul /gone (404) est cassé.
     assert_eq!(broken, [("gone".to_owned(), "404".to_owned())]);
 }
+
+static ROBOTS_5XX_SITE: &[Route] = &[
+    ("/", 200, "", r#"<a href="/ok">ok</a>"#),
+    ("/ok", 200, "", "ok"),
+    ("/robots.txt", 503, "", "indisponible"),
+];
+
+#[tokio::test]
+async fn robots_5xx_blocks_everything_unless_ignored() {
+    let start = serve(ROBOTS_5XX_SITE).await;
+    let pages = crawl(start.clone(), local_cfg()).await.unwrap();
+    assert!(
+        pages.iter().all(|p| p.status.is_none()),
+        "5xx = tout interdit"
+    );
+
+    let cfg = CrawlConfig {
+        respect_robots: false,
+        ..local_cfg()
+    };
+    let pages = crawl(start, cfg).await.unwrap();
+    assert!(pages
+        .iter()
+        .any(|p| p.url.path() == "/ok" && p.status == Some(200)));
+}
+
+static BASE_HREF_SITE: &[Route] = &[
+    ("/", 200, "", r#"<base href="/docs/"><a href="page">p</a>"#),
+    ("/docs/page", 200, "", "ok"),
+];
+
+#[tokio::test]
+async fn base_href_resolves_relative_links() {
+    let start = serve(BASE_HREF_SITE).await;
+    let pages = crawl(start, local_cfg()).await.unwrap();
+    assert!(pages
+        .iter()
+        .any(|p| p.url.path() == "/docs/page" && p.status == Some(200)));
+}

@@ -59,7 +59,7 @@ impl Resolve for SafeResolver {
 pub struct Fetched {
     pub status: u16,
     pub location: Option<String>,
-    /// `Retry-After` en secondes (la forme « date HTTP » est ignorée).
+    /// `Retry-After` (secondes ou date HTTP).
     pub retry_after: Option<Duration>,
     /// Corps HTML (tronqué à `max_body_bytes`) ; `None` si la réponse n'est pas du HTML 2xx.
     pub html: Option<Vec<u8>>,
@@ -127,29 +127,40 @@ impl Client {
         Ok(())
     }
 
-    /// robots.txt de l'origine ; `None` si absent ou en erreur (= tout autorisé).
-    // ponytail: Google traite un 5xx comme « tout interdit » ; ici on autorise.
+    /// robots.txt de l'origine ; `None` si absent (4xx) ou injoignable (= tout autorisé).
+    /// Un 5xx vaut « tout interdit » (comportement de Google) : `--ignore-robots` le contourne.
     pub async fn robots_txt(&self, origin: &Url) -> Option<String> {
-        self.get_text(&origin.join("/robots.txt").ok()?, 512 * 1024)
+        match self
+            .get_text_status(&origin.join("/robots.txt").ok()?, 512 * 1024)
             .await
+        {
+            Ok(t) => Some(t),
+            Err(Some(s)) if s >= 500 => Some("User-agent: *\nDisallow: /\n".into()),
+            Err(_) => None,
+        }
     }
 
     /// Corps texte d'une réponse 2xx (tronqué à `max` octets) ; `None` sinon.
     pub async fn get_text(&self, url: &Url, max: usize) -> Option<String> {
-        self.check(url).ok()?;
-        let mut resp = self.http.get(url.clone()).send().await.ok()?;
+        self.get_text_status(url, max).await.ok()
+    }
+
+    /// Comme `get_text`, mais l'erreur porte le statut HTTP (`None` = échec réseau ou URL interdite).
+    async fn get_text_status(&self, url: &Url, max: usize) -> Result<String, Option<u16>> {
+        self.check(url).map_err(|_| None)?;
+        let mut resp = self.http.get(url.clone()).send().await.map_err(|_| None)?;
         if !resp.status().is_success() {
-            return None;
+            return Err(Some(resp.status().as_u16()));
         }
         let mut buf = Vec::new();
-        while let Some(c) = resp.chunk().await.ok()? {
+        while let Some(c) = resp.chunk().await.map_err(|_| None)? {
             buf.extend_from_slice(&c);
             if buf.len() >= max {
                 buf.truncate(max);
                 break;
             }
         }
-        Some(String::from_utf8_lossy(&gunzip_if_needed(buf, max)).into_owned())
+        Ok(String::from_utf8_lossy(&gunzip_if_needed(buf, max)).into_owned())
     }
 
     pub async fn fetch(&self, url: &Url) -> Result<Fetched, String> {
@@ -180,7 +191,7 @@ impl Client {
             .headers()
             .get(reqwest::header::RETRY_AFTER)
             .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.trim().parse::<u64>().ok())
+            .and_then(retry_after_secs)
             .map(Duration::from_secs);
         let is_html = resp
             .headers()
@@ -291,5 +302,30 @@ mod tests {
         for ip in ["93.184.216.34", "8.8.8.8", "2606:4700::1111"] {
             assert!(!is_forbidden(ip.parse().unwrap()), "{ip}");
         }
+    }
+}
+
+/// `Retry-After` : nombre de secondes, ou date HTTP (dans le passé = 0).
+fn retry_after_secs(v: &str) -> Option<u64> {
+    let v = v.trim();
+    v.parse().ok().or_else(|| {
+        let at = httpdate::parse_http_date(v).ok()?;
+        Some(
+            at.duration_since(std::time::SystemTime::now())
+                .map_or(0, |d| d.as_secs()),
+        )
+    })
+}
+
+#[cfg(test)]
+mod retry_after_tests {
+    use super::retry_after_secs;
+
+    #[test]
+    fn seconds_and_http_dates() {
+        assert_eq!(retry_after_secs(" 7 "), Some(7));
+        assert_eq!(retry_after_secs("Wed, 21 Oct 2015 07:28:00 GMT"), Some(0));
+        assert!(retry_after_secs("Fri, 31 Dec 2100 23:59:59 GMT").unwrap() > 1_000_000);
+        assert_eq!(retry_after_secs("bientôt"), None);
     }
 }
