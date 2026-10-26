@@ -36,7 +36,7 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 
 6. **Résultats pendant l'audit** : enregistrer au fil de l'eau (tableau consultable en direct, mémoire bornée sur très gros sites). Lève aussi une dette.
 7. **Authentification des sites audités** : Basic, en-têtes, cookies, formulaire ; identifiants chiffrés (AES-GCM, clé `CALLISTSEO_SECRET_KEY`, fonction désactivée sans clé), jamais renvoyés ni journalisés, mêmes filtres SSRF.
-8. **Qualité des règles** : corpus `tests/fixtures` (HTML invalides, gros documents, boucles), tests SSRF par redirection, audit sur 10+ vrais sites (faux positifs), `cargo deny`, benchmark dans la CI (détection de régressions), seuils configurables en CLI, documentation des faux positifs.
+8. **Qualité des règles** : corpus `tests/fixtures` (HTML invalides, gros documents, boucles), ~~tests SSRF par redirection~~ faits (IP littérales, `localhost`, redirection vers une adresse interne non suivie), audit sur 10+ vrais sites (faux positifs), `cargo deny`, benchmark dans la CI (détection de régressions), seuils configurables en CLI, documentation des faux positifs.
 9. ~~Robustesse robots~~ fait : `robots.txt` en 5xx = tout interdit (comme Google ; `--ignore-robots` le contourne), `Retry-After` en date HTTP, `<base href>` pris en compte. `rel=nofollow` reste volontairement exploré (le lien reste dans le graphe) ; compté dans `nofollow_links`.
 10. **Suivi des régressions** : comparaison avec l'audit précédent poussée à l'utilisateur (webhook / e-mail), calendrier jour et heure au lieu d'un simple intervalle, tendances sur plusieurs audits, diff en JSON/CSV.
 
@@ -92,7 +92,7 @@ Sécurité en place : http/https seulement ; IP privées, loopback, link-local e
 | 004 | File de crawl + déduplication | ✅ | `Crawl-delay`, `--delay-ms`, pause sur 429/503 (`Retry-After` secondes ou date) |
 | 005 | Découverte de liens + profondeur | ✅ | `<base href>` pris en compte ; `rel=nofollow` exploré volontairement |
 | 006 | Métadonnées et directives SEO | ✅ | `X-Robots-Tag`, hreflang ; Open Graph si besoin |
-| 007 | Corpus de fixtures + tests | 🟡 | étape 8 |
+| 007 | Corpus de fixtures + tests | 🟡 | tests SSRF faits ; reste le dossier `tests/fixtures` (étape 8) |
 | 008 | Persistance SQLite | 🟡 | reste : politique de rétention, `CrawlRun` / `Issue` dédiés |
 | 009 | CLI de crawl | ✅ | `--format text\|csv\|json`, `--db` / `--project`, `runs`, `export`, `diff` |
 | 010 | Règles SEO + regroupement des problèmes | 🟡 | gravité harmonisée (source unique, `--fail-on`) ; reste : seuils configurables en CLI, doc des faux positifs (étape 8) ; piste : exclure des doublons les pages dont la canonical pointe ailleurs |
