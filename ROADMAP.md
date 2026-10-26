@@ -29,8 +29,9 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 1. **Nom, dépôt, domaine** à valider (marques, juridique), puis URL d'information du robot (`--user-agent`), identifiant Tauri `org.callistseo.desktop`, domaine du site vitrine.
 2. ~~Documents de projet~~ faits : `SECURITY.md`, `CONTRIBUTING.md`, `docs/installation.md` (adresse de contact de sécurité : signalement privé GitHub, à confirmer une fois le dépôt définitif).
 3. **Déploiement web** : image publiée (registre) multi-architectures, HTTPS documenté (proxy dans le compose), CSP sur l'interface, limitation de débit, journal d'accès.
-4. **Desktop** : essais réels Windows / Linux (builds de `release.yml` jamais lancés sur une vraie machine), validation visuelle de la fenêtre et des exports natifs, signature / notarisation, icône définitive, mise à jour automatique.
+4. **Desktop** : essais réels Windows / Linux (builds de `release.yml` jamais lancés sur une vraie machine), validation visuelle de la fenêtre et des exports natifs, signature / notarisation, icône définitive (mise à jour : étape 6).
 5. **Validation terrain** : 5 testeurs professionnels, dont 3 réutilisent l'outil sur un autre site.
+6. **Mise à jour du service** : desktop (updater Tauri, artefacts signés, vérification au lancement), web (version affichée dans l'interface et `/api/health`, notification quand une nouvelle version existe, procédure documentée `docker compose pull && up -d`, migrations de base automatiques et sauvegarde avant migration, retour arrière).
 
 ### Priorité 2 — valeur produit
 
