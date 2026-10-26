@@ -839,3 +839,57 @@ async fn base_href_resolves_relative_links() {
         .iter()
         .any(|p| p.url.path() == "/docs/page" && p.status == Some(200)));
 }
+
+/// Sans `allow_private`, aucune destination interne n'est jamais contactée : IP littérales
+/// (métadonnées cloud, loopback, IPv4 mappée) et nom d'hôte résolu vers le loopback.
+#[tokio::test]
+async fn private_destinations_are_refused_without_allow_private() {
+    let local = serve(SITE).await;
+    let port = local.port().unwrap();
+    for target in [
+        "http://169.254.169.254/latest/meta-data/".to_owned(),
+        "http://[::1]/".to_owned(),
+        "http://[::ffff:127.0.0.1]/".to_owned(),
+        "http://10.0.0.1/".to_owned(),
+        format!("http://localhost:{port}/"),
+        format!("http://127.0.0.1:{port}/"),
+    ] {
+        let pages = crawl(Url::parse(&target).unwrap(), CrawlConfig::default())
+            .await
+            .unwrap();
+        assert!(
+            pages
+                .iter()
+                .all(|p| p.status.is_none()
+                    && p.error.as_ref().is_some_and(|e| e.contains("interdite"))),
+            "{target} : {:?}",
+            pages
+                .iter()
+                .map(|p| (&p.status, &p.error))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+/// Une redirection vers une destination interne n'est pas suivie en place : la page redirigeante
+/// est enregistrée avec sa cible, et la cible repasse par la file (donc par le même contrôle).
+#[tokio::test]
+async fn redirect_to_an_internal_address_is_recorded_not_followed() {
+    static R: &[Route] = &[
+        ("/", 200, "", r#"<a href="/go">go</a>"#),
+        (
+            "/go",
+            302,
+            "Location: http://169.254.169.254/latest/meta-data/\r\n",
+            "",
+        ),
+    ];
+    let start = serve(R).await;
+    let pages = crawl(start, local_cfg()).await.unwrap();
+    let go = pages.iter().find(|p| p.url.path() == "/go").unwrap();
+    assert_eq!(go.status, Some(302));
+    assert_eq!(
+        go.redirect_to.as_ref().unwrap().host_str(),
+        Some("169.254.169.254")
+    );
+}
