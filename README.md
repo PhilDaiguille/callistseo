@@ -173,6 +173,8 @@ Comptes utilisateurs et séparation des données (un seul jeton partagé), HTTPS
 
 ## Développement
 
+Installation détaillée : [`docs/installation.md`](docs/installation.md). Contribuer : [`CONTRIBUTING.md`](CONTRIBUTING.md). Sécurité : [`SECURITY.md`](SECURITY.md).
+
 Un `Makefile` regroupe les commandes courantes : `make help` les liste.
 
 ```

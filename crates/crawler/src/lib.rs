@@ -388,10 +388,11 @@ async fn visit(
     }
 }
 
-// ponytail: ignore <base href> et rel=nofollow ; un seul parse pour liens + métadonnées.
+// ponytail: rel=nofollow n'empêche pas l'exploration (le lien reste dans le graphe) ; un seul parse pour liens + métadonnées.
 /// Sélecteurs CSS compilés une seule fois (ils l'étaient à chaque page, plusieurs fois par page).
 struct Selectors {
     anchors: scraper::Selector,
+    base: scraper::Selector,
     title: scraper::Selector,
     meta: scraper::Selector,
     h1: scraper::Selector,
@@ -408,6 +409,7 @@ static SELECTORS: LazyLock<Selectors> = LazyLock::new(|| {
     let parse = |s| scraper::Selector::parse(s).expect("sélecteur constant valide");
     Selectors {
         anchors: parse("a[href]"),
+        base: parse("base[href]"),
         title: parse("title"),
         meta: parse("meta[name][content]"),
         h1: parse("h1"),
@@ -518,6 +520,12 @@ fn parse_html(
     let source = String::from_utf8_lossy(body);
     let doc = scraper::Html::parse_document(&source);
     let sel = &*SELECTORS;
+    // `<base href>` (premier élément) change la base de résolution des URL relatives.
+    let doc_base = doc
+        .select(&sel.base)
+        .next()
+        .and_then(|b| normalize(b.value().attr("href")?.trim(), Some(base)));
+    let base = doc_base.as_ref().unwrap_or(base);
     let text = |e: scraper::ElementRef| e.text().collect::<String>().trim().to_owned();
     let meta_content = |name: &str| {
         doc.select(&sel.meta)
