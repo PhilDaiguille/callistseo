@@ -2,7 +2,7 @@
 # Prérequis : Rust stable, Node, pnpm ; Docker pour les cibles docker-*.
 
 .DEFAULT_GOAL := help
-.PHONY: help install build test lint fmt fmt-check check web-dev web-build web-test \
+.PHONY: help install build test lint fmt fmt-check check deny web-dev web-build web-test \
 	serve serve-ui crawl rules desktop-dev desktop-build docker-build docker-up docker-down docker-logs \
 	bench bench-quick clean
 
@@ -35,6 +35,9 @@ fmt-check: ## Vérifie le formatage sans modifier
 	cargo fmt --all --check
 
 # --- Interface web -----------------------------------------------------------------------------
+deny: ## Licences et failles des dépendances (cargo install --locked cargo-deny)
+	cargo deny check
+
 web-dev: ## Interface en développement (http://localhost:5173, proxy /api -> 127.0.0.1:8080)
 	pnpm --filter web dev
 

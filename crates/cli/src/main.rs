@@ -23,6 +23,8 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+// Analysée une seule fois au lancement : la taille de `Crawl` (options et seuils) est sans effet.
+#[allow(clippy::large_enum_variant)]
 enum Command {
     /// Explore un site et liste les URL découvertes
     Crawl {
@@ -76,6 +78,8 @@ enum Command {
         /// Gravité à partir de laquelle la commande échoue (code retour 1) : utile en CI
         #[arg(long, value_enum, default_value_t = FailOn::Error)]
         fail_on: FailOn,
+        #[command(flatten)]
+        thresholds: Thresholds,
         /// Format de sortie
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
@@ -345,6 +349,52 @@ fn summary(pages: &[CrawledPage], issues: &[Issue], fail_on: FailOn) -> ExitCode
     ExitCode::from(u8::from(failed))
 }
 
+/// Seuils des règles éditoriales (défauts : `RulesConfig::default`). Seul `crawl` les applique :
+/// un audit enregistré garde les problèmes calculés avec ses seuils.
+#[derive(clap::Args, Debug)]
+struct Thresholds {
+    /// Title trop court sous N caractères (défaut 30)
+    #[arg(long, help_heading = "Seuils des règles")]
+    title_min: Option<usize>,
+    /// Title trop long au-delà de N caractères (défaut 60)
+    #[arg(long, help_heading = "Seuils des règles")]
+    title_max: Option<usize>,
+    /// Meta description trop courte sous N caractères (défaut 70)
+    #[arg(long, help_heading = "Seuils des règles")]
+    description_min: Option<usize>,
+    /// Meta description trop longue au-delà de N caractères (défaut 160)
+    #[arg(long, help_heading = "Seuils des règles")]
+    description_max: Option<usize>,
+    /// Contenu peu fourni sous N mots (défaut 200)
+    #[arg(long, help_heading = "Seuils des règles")]
+    min_words: Option<usize>,
+    /// Réponse lente au-delà de N ms jusqu'aux premiers octets (défaut 1000)
+    #[arg(long, help_heading = "Seuils des règles")]
+    slow_ms: Option<u64>,
+    /// Page profonde au-delà de N clics depuis l'accueil (défaut 5)
+    #[arg(long, help_heading = "Seuils des règles")]
+    deep_page: Option<usize>,
+    /// Trop de variantes `?param` d'un même chemin au-delà de N (défaut 20)
+    #[arg(long, help_heading = "Seuils des règles")]
+    max_query_variants: Option<usize>,
+}
+
+impl Thresholds {
+    fn rules(&self) -> RulesConfig {
+        let d = RulesConfig::default();
+        RulesConfig {
+            title_min: self.title_min.unwrap_or(d.title_min),
+            title_max: self.title_max.unwrap_or(d.title_max),
+            description_min: self.description_min.unwrap_or(d.description_min),
+            description_max: self.description_max.unwrap_or(d.description_max),
+            min_words: self.min_words.unwrap_or(d.min_words),
+            slow_ms: self.slow_ms.unwrap_or(d.slow_ms),
+            max_depth: self.deep_page.unwrap_or(d.max_depth),
+            max_query_variants: self.max_query_variants.unwrap_or(d.max_query_variants),
+        }
+    }
+}
+
 async fn run(cmd: Command) -> Result<ExitCode, String> {
     match cmd {
         Command::Crawl {
@@ -359,6 +409,7 @@ async fn run(cmd: Command) -> Result<ExitCode, String> {
             ignore_robots,
             user_agent,
             fail_on,
+            thresholds,
             format,
             out,
             db,
@@ -406,7 +457,7 @@ async fn run(cmd: Command) -> Result<ExitCode, String> {
             };
             let mut pages = callistseo_crawler::crawl(start.clone(), cfg.clone()).await?;
             pages.sort_by(|a, b| (a.depth, &a.url).cmp(&(b.depth, &b.url)));
-            let issues = analyze(&pages, &RulesConfig::default());
+            let issues = analyze(&pages, &thresholds.rules());
             let name = project.unwrap_or_else(|| start.host_str().unwrap_or("site").to_owned());
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

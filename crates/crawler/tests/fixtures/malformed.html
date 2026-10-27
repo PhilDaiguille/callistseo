@@ -1,0 +1,21 @@
+<!-- HTML invalide : balises non fermées, mal imbriquées, head et body en double, attributs sans guillemets -->
+<html><head><title>Page <b>cassée</title><title>Deuxième title</title>
+<meta name=description content=sans guillemets>
+<meta name="robots" content="NoIndex, FOLLOW">
+<head><link rel=canonical href=/malformed.html?ref=1></head>
+<body><body>
+<h1>Titre <h1>imbriqué</h1>
+<p><div><table><tr><td><a href="/malformed.html">soi-même</td></a></tr>
+<a href=javascript:alert(1)>js</a>
+<a href="mailto:x@exemple.fr">mail</a>
+<a href="http://[::1">ipv6 tronquée</a>
+<a href="%%%">pourcentages</a>
+<a href="//">double barre</a>
+<a href="   /espaces.html   ">espaces</a>
+<a href="">vide</a>
+<a>sans href</a>
+<a href="/dossier/../malformed.html#ancre">relatif</a>
+<!-- commentaire jamais fermé
+<script>document.write('<a href="/script.html">')</script>
+<![CDATA[ <a href="/cdata.html">x</a> ]]>
+<img src=><img alt="sans src"><img src="data:image/png;base64,AAAA">

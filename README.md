@@ -41,6 +41,8 @@ API HTTP : `callistseo serve --db audits.db --token "$(openssl rand -hex 16)"` (
 L'API ne permet jamais de viser le réseau local : le filtre SSRF du crawler reste actif.
 
 Comparaison : `callistseo diff --db audits.db --before 1 --after 2` (code retour 1 si de nouvelles erreurs sont apparues).
+Seuils des règles éditoriales réglables : `--title-min`, `--title-max`, `--description-min`, `--description-max`, `--min-words`, `--slow-ms`, `--deep-page`, `--max-query-variants` (voir `callistseo crawl --help`).
+
 Code retour de `crawl` : 0 si le seuil `--fail-on` n'est pas atteint, 1 sinon, 2 si l'appel est invalide. `--fail-on error` (défaut : au moins une erreur), `warning` (erreur ou avertissement) ou `never`.
 
 ## Gravité des règles
