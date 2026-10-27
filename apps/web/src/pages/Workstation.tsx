@@ -21,12 +21,23 @@ import { useQueryParams } from '@/lib/useQueryParams'
  * centre, inspecteur à droite. Tout l'état (rapport, tri, colonnes, recherche, URL choisie) est dans
  * l'adresse : un lien reproduit exactement la vue.
  */
-export function Workstation({ crawlId, projectId, onTab }: { crawlId: number; projectId: number; onTab: (tab: string) => void }) {
+/** `running` : audit en cours, sans problèmes calculés ; la vue par défaut est alors la liste des URL. */
+export function Workstation({
+  crawlId,
+  projectId,
+  onTab,
+  running = false,
+}: {
+  crawlId: number
+  projectId: number
+  onTab: (tab: string) => void
+  running?: boolean
+}) {
   const [params, update] = useQueryParams()
   const [paletteOpen, setPaletteOpen] = useState(false)
   const reports = useQuery({ queryKey: ['reports', crawlId], queryFn: () => api.reports(crawlId) })
 
-  const report = params.get('r') ?? 'overview'
+  const report = params.get('r') ?? (running ? 'all' : 'overview')
   const sort = params.get('sort')
   const dir = params.get('dir') === 'desc' ? 'desc' : 'asc'
   const search = params.get('q') ?? ''

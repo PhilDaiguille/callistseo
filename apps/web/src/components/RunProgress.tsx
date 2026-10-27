@@ -3,11 +3,11 @@ import { formatEta, runProgress } from '@/lib/progress'
 import { cn } from '@/lib/utils'
 
 /** Barre d'avancement d'un audit en cours : pourcentage, URL terminées / découvertes, débit et durée restante. */
-export function RunProgress({ pages, live }: { pages: number; live?: LiveStats }) {
+export function RunProgress({ pages, live, className }: { pages: number; live?: LiveStats; className?: string }) {
   const p = runProgress(pages, live)
   const idle = live?.paused || live?.stopping
   return (
-    <div className="mx-auto mt-4 grid w-full max-w-xl gap-1.5 text-left">
+    <div className={cn('mx-auto mt-4 grid w-full max-w-xl gap-1.5 text-left', className)}>
       <div className="flex items-baseline justify-between text-sm">
         <span className="font-semibold tabular-nums">{p.percent} %</span>
         <span className="text-muted-foreground tabular-nums">

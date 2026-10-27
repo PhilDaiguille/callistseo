@@ -973,7 +973,12 @@ fn spawn_crawl(s: &AppState, run_id: i64, start: Url, cfg: CrawlConfig) {
     let task_state = s.clone();
     let task_stats = stats.clone();
     let handle = tokio::spawn(async move {
-        let outcome = match callistseo_crawler::crawl_observed(start, cfg, task_stats).await {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let writer = tokio::spawn(write_live_pages(task_state.clone(), run_id, rx));
+        let result = callistseo_crawler::crawl_live(start, cfg, task_stats, Some(tx)).await;
+        // Le canal est fermé (fin du crawl) : on attend les derniers lots avant le résultat complet.
+        let _ = writer.await;
+        let outcome = match result {
             Ok(mut pages) => {
                 pages.sort_by(|a, b| (a.depth, &a.url).cmp(&(b.depth, &b.url)));
                 let issues = analyze(&pages, &RulesConfig::default());
@@ -993,6 +998,27 @@ fn spawn_crawl(s: &AppState, run_id: i64, start: Url, cfg: CrawlConfig) {
         lock(&task_state.running).remove(&run_id);
     });
     running.insert(run_id, (handle.abort_handle(), stats));
+}
+
+/// Pages en direct : enregistrées par lots (tout ce qui attend, au plus `LIVE_BATCH`) pendant
+/// l'audit, pour que le tableau se remplisse. Si l'audit est annulé, le canal se ferme et la
+/// tâche s'arrête ; un lot arrivé trop tard est ignoré par le stockage.
+async fn write_live_pages(
+    s: AppState,
+    run_id: i64,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<CrawledPage>,
+) {
+    const LIVE_BATCH: usize = 500;
+    let mut batch = Vec::with_capacity(LIVE_BATCH);
+    while rx.recv_many(&mut batch, LIVE_BATCH).await > 0 {
+        let pages = std::mem::take(&mut batch);
+        if let Err(e) = s.db(move |st| st.add_live_pages(run_id, &pages)).await {
+            eprintln!(
+                "audit #{run_id}: pages en direct non enregistrées ({})",
+                e.1
+            );
+        }
+    }
 }
 
 async fn get_crawl(State(s): State<AppState>, Path(id): Path<i64>) -> ApiResult<Json<Value>> {

@@ -61,6 +61,17 @@ pub async fn crawl_observed(
     cfg: CrawlConfig,
     stats: Arc<CrawlStats>,
 ) -> Result<Vec<CrawledPage>, String> {
+    crawl_live(start, cfg, stats, None).await
+}
+
+/// Comme `crawl_observed`, et chaque page terminée part aussi dans `live` (affichage pendant
+/// l'audit). La copie envoyée précède la vérification des liens externes, faite à la fin.
+pub async fn crawl_live(
+    start: Url,
+    cfg: CrawlConfig,
+    stats: Arc<CrawlStats>,
+    live: Option<tokio::sync::mpsc::UnboundedSender<CrawledPage>>,
+) -> Result<Vec<CrawledPage>, String> {
     let client = Arc::new(Client::new(&cfg)?);
     let scope = Scope::new(&cfg.scope)?;
     let extractors = Arc::new(Extractors::new(&cfg.extractors)?);
@@ -237,6 +248,10 @@ pub async fn crawl_observed(
             {
                 queue.push_back((link.clone(), depth));
             }
+        }
+        if let Some(tx) = &live {
+            // Récepteur fermé (audit annulé) : sans conséquence pour le crawl.
+            let _ = tx.send(page.clone());
         }
         pages.push(page);
         stats.completed.store(pages.len(), Ordering::Relaxed);
