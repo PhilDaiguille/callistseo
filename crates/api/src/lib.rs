@@ -312,7 +312,7 @@ impl LocalApi {
 }
 
 async fn health() -> Json<Value> {
-    Json(json!({ "status": "ok" }))
+    Json(json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION") }))
 }
 
 /// Une route `/api/…` inconnue ne doit jamais retomber sur l'interface (`index.html`).

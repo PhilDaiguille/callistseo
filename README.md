@@ -94,8 +94,8 @@ docker compose up -d --build    # interface et API sur http://127.0.0.1:8080
 - **Image publiée** : chaque tag `v*` publie `ghcr.io/<propriétaire>/<dépôt>` (amd64, arm64) ; `CALLISTSEO_IMAGE` dans `.env` pour l'utiliser au lieu d'un build local.
 - **Protections HTTP** : CSP stricte (aucun script ni ressource externe), `nosniff`, `no-referrer`, interdiction d'affichage en cadre ; 10 tentatives de connexion ratées par minute et par adresse, puis 429 ; journal d'accès sur stderr (`docker compose logs`), sans les paramètres d'URL.
 - **Durci** : utilisateur non-root, système de fichiers en lecture seule (sauf `/data`), aucune capacité Linux, `no-new-privileges`. Les destinations privées (dont les adresses internes du réseau Docker et les métadonnées cloud) sont refusées par le crawler.
-- **Sonde de santé** : `GET /api/health` (publique). Arrêt propre sur SIGTERM.
-- **Sauvegarde** : copiez le volume `callistseo_callistseo-data` (base SQLite `audits.db`).
+- **Sonde de santé** : `GET /api/health` (publique, renvoie aussi la version, affichée dans l'en-tête de l'interface). Arrêt propre sur SIGTERM.
+- **Sauvegarde** : copiez le volume `callistseo_callistseo-data` (base SQLite `audits.db`). Avant chaque migration de schéma, une copie `audits.db.avant-v<N>.bak` est écrite automatiquement (retour arrière : `docs/installation.md`).
 - **Limites connues** : une seule instance (SQLite), pas de comptes utilisateurs (un jeton partagé).
 
 ## Serveur MCP (assistants IA)

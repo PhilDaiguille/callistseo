@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Link, NavLink, Outlet, useMatch, useNavigate } from 'react-router-dom'
 import { LogOut, Monitor, Moon, Sun } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Mascot } from '@/components/Mascot'
-import { getToken, setToken } from '@/lib/api'
+import { api, getToken, setToken } from '@/lib/api'
 import { applyTheme, loadPreference, nextPreference, savePreference, type ThemePreference } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { isDesktop } from '@/lib/transport'
@@ -64,6 +64,13 @@ const navLink = ({ isActive }: { isActive: boolean }) =>
     isActive ? 'border-ink bg-primary text-primary-foreground' : 'border-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
   )
 
+/** Version du serveur (utile pour savoir quoi mettre à jour) ; rien si la sonde ne répond pas. */
+function ServerVersion() {
+  const health = useQuery({ queryKey: ['health'], queryFn: api.health, staleTime: Infinity })
+  if (!health.data?.version) return null
+  return <span className="text-xs text-muted-foreground tabular-nums">v{health.data.version}</span>
+}
+
 export function Layout() {
   // L'écran d'un audit est un poste de travail (rapports, tableau, inspecteur) : il prend toute la largeur.
   const wide = useMatch('/crawls/:id') !== null
@@ -87,6 +94,7 @@ export function Layout() {
             </NavLink>
           </nav>
           <div className="ml-auto flex items-center gap-2">
+            <ServerVersion />
             <ThemeToggle />
             {/* En desktop l'API n'écoute sur aucun port : pas de connexion. */}
             {!isDesktop && <LogoutButton />}

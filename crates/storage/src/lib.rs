@@ -7,7 +7,7 @@ use callistseo_core::{
 use rusqlite::{params, Connection, OptionalExtension, Row, Transaction};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use url::Url;
@@ -251,15 +251,17 @@ pub struct IssueQuery {
 }
 
 impl Store {
+    /// Ouvre (ou crée) la base. Avant de migrer une base existante, une copie est écrite à côté
+    /// (`audits.db.avant-v13.bak`) : pour revenir en arrière, remettre cette copie avec l'ancienne version.
     pub fn open(path: &Path) -> Result<Self> {
-        Self::init(Connection::open(path).map_err(db)?)
+        Self::init(Connection::open(path).map_err(db)?, Some(path))
     }
 
     pub fn open_in_memory() -> Result<Self> {
-        Self::init(Connection::open_in_memory().map_err(db)?)
+        Self::init(Connection::open_in_memory().map_err(db)?, None)
     }
 
-    fn init(mut conn: Connection) -> Result<Self> {
+    fn init(mut conn: Connection, path: Option<&Path>) -> Result<Self> {
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(db)?;
         conn.pragma_update(None, "foreign_keys", true).map_err(db)?;
@@ -271,6 +273,21 @@ impl Store {
             return Err(format!(
                 "base créée par une version plus récente (schéma {version})"
             ));
+        }
+        if let Some(path) = path.filter(|_| version > 0 && version < MIGRATIONS.len()) {
+            let mut bak = path.as_os_str().to_owned();
+            bak.push(format!(".avant-v{}.bak", MIGRATIONS.len()));
+            let bak = PathBuf::from(bak);
+            // Une copie déjà présente (migration interrompue) est la bonne : on la garde.
+            if !bak.exists() {
+                conn.execute("VACUUM INTO ?1", [bak.to_string_lossy()])
+                    .map_err(|e| format!("sauvegarde avant migration ({}) : {e}", bak.display()))?;
+                eprintln!(
+                    "base sauvegardée avant migration (schéma {version} → {}) : {}",
+                    MIGRATIONS.len(),
+                    bak.display()
+                );
+            }
         }
         for (i, sql) in MIGRATIONS.iter().enumerate().skip(version) {
             let tx = conn.transaction().map_err(db)?;
@@ -1756,6 +1773,18 @@ mod tests {
         let (pages, _) = store.load_run(1).unwrap();
         assert_eq!(pages.len(), 1);
         assert!(pages[0].facts.ttfb_ms.is_none() && pages[0].facts.headers.is_empty());
+        // Une copie de la base d'avant la migration est restée à côté, toujours au schéma 2.
+        let bak = dir.join(format!("old.db.avant-v{}.bak", MIGRATIONS.len()));
+        let old = Connection::open(&bak).unwrap();
+        let v: i64 = old
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 2);
+        drop((store, old));
+        // Base déjà à jour : aucune nouvelle copie.
+        std::fs::remove_file(&bak).unwrap();
+        drop(Store::open(&path).unwrap());
+        assert!(!bak.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

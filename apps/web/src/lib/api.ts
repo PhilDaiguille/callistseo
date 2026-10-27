@@ -335,6 +335,8 @@ async function request<T>(path: string, init: { method?: string; body?: unknown 
 }
 
 export const api = {
+  /** Publique : état et version du serveur. */
+  health: () => request<{ status: string; version: string }>('/api/health'),
   projects: () => request<{ projects: Project[] }>('/api/projects').then((r) => r.projects),
   createProject: (body: { name: string; start_url: string }) =>
     request<Project>('/api/projects', { method: 'POST', body }),
