@@ -169,7 +169,7 @@ export CALLISTSEO_USER_AGENT="CallistSEO/0.1 (+https://votre-site.fr/bot)"   # o
 
 ## Pas encore fait
 
-Comptes utilisateurs et séparation des données (un seul jeton partagé), HTTPS intégré, écriture progressive en base pour les très gros sites (les résultats restent en mémoire jusqu'à la fin), extraction de hreflang / Open Graph / `X-Robots-Tag`, analyse sémantique, import Search Console, signature des applications desktop. Détails et priorités : [`ROADMAP.md`](ROADMAP.md).
+Comptes utilisateurs et séparation des données (un seul jeton partagé), HTTPS intégré, mémoire bornée pour les très gros sites (les URL s'affichent pendant l'audit, mais l'analyse garde tout en mémoire jusqu'à la fin), extraction de hreflang / Open Graph / `X-Robots-Tag`, analyse sémantique, import Search Console, signature des applications desktop. Détails et priorités : [`ROADMAP.md`](ROADMAP.md).
 
 ## Développement
 

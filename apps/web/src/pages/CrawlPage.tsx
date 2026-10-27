@@ -1,9 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { RunBadge } from '@/components/Badges'
 import { PageSkeleton } from '@/components/Skeleton'
-import { EmptyState } from '@/components/EmptyState'
 import { QueryError } from '@/components/QueryError'
 import { RunProgress } from '@/components/RunProgress'
 import { Button } from '@/components/ui/button'
@@ -61,6 +60,21 @@ export function CrawlPage() {
       setExportError(e)
     }
   }
+
+  // Pendant l'audit, le tableau se remplit : on relit ses données toutes les 3 s, puis une
+  // dernière fois à la fin (problèmes et maillage n'existent qu'à ce moment).
+  const status = crawl.data?.status
+  useEffect(() => {
+    const refresh = () => {
+      for (const key of ['reports', 'rows', 'segments', 'page-detail']) void queryClient.invalidateQueries({ queryKey: [key, id] })
+    }
+    if (status !== 'running') {
+      refresh()
+      return
+    }
+    const timer = setInterval(refresh, 3000)
+    return () => clearInterval(timer)
+  }, [status, id, queryClient])
 
   const projectId = crawl.data?.project_id
   // L'historique du projet sert à situer cet audit par rapport au précédent.
@@ -175,40 +189,48 @@ export function CrawlPage() {
       </div>
       <QueryError error={exportError} />
 
-      {running ? (
-        <EmptyState mood="normal" working>
-          {c.live?.paused ? 'Audit en pause' : c.live?.stopping ? 'Arrêt en cours…' : 'Audit en cours'}. Les résultats apparaîtront à la fin.
-          <RunProgress pages={c.pages} live={c.live} />
+      {running && (
+        <div className="panel flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm" role="status">
+          <span className="font-semibold">
+            {c.live?.paused ? 'Audit en pause' : c.live?.stopping ? 'Arrêt en cours…' : 'Audit en cours'}
+          </span>
+          <RunProgress pages={c.pages} live={c.live} className="order-last m-0 max-w-none" />
           {c.live && (
-            <span className="mt-1 block text-sm text-muted-foreground">
+            <span className="text-muted-foreground">
               {c.live.urls_per_second.toFixed(1)} URL/s · file {c.live.queued} · {Math.round(c.live.avg_latency_ms)} ms · concurrence{' '}
               {c.live.concurrency}
               {c.live.failures > 0 && ` · ${c.live.failures} échec(s)`}
             </span>
           )}
-        </EmptyState>
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col gap-4">
+          <span className="basis-full text-muted-foreground">
+            Les URL explorées s’affichent au fil de l’eau ; problèmes, liens entrants et maillage sont calculés à la fin.
+          </span>
+        </div>
+      )}
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
           <Tabs value={tab} onValueChange={(v) => update({ tab: v === 'data' ? null : String(v) })}>
             <TabsList>
               <TabsTrigger value="data">Données</TabsTrigger>
-              <TabsTrigger value="links">Maillage</TabsTrigger>
-              <TabsTrigger value="diff">Comparaison</TabsTrigger>
+              <TabsTrigger value="links" disabled={running}>
+                Maillage
+              </TabsTrigger>
+              <TabsTrigger value="diff" disabled={running}>
+                Comparaison
+              </TabsTrigger>
             </TabsList>
           </Tabs>
           {tab === 'data' && (
             <div className="min-h-0 flex-1">
-              <Workstation crawlId={id} projectId={c.project_id} onTab={(t) => update({ tab: t })} />
+              <Workstation crawlId={id} projectId={c.project_id} running={running} onTab={(t) => update({ tab: t })} />
             </div>
           )}
-          {tab !== 'data' && (
+          {tab !== 'data' && !running && (
             <div className="min-h-0 flex-1 lg:overflow-auto">
               {tab === 'links' && <LinksView crawlId={id} crawlStatus={c.status} />}
               {tab === 'diff' && <DiffView crawlId={id} projectId={c.project_id} />}
             </div>
           )}
-        </div>
-      )}
+      </div>
     </div>
   )
 }

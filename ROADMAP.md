@@ -1,7 +1,7 @@
 # CallistSEO — Roadmap
 
 Document de suivi, mis à jour à chaque jalon. Légende : ✅ fait · 🟡 partiel · ⬜ à faire · ⏸ reporté.
-Dernière mise à jour : 26 oct. 2026.
+Dernière mise à jour : 27 oct. 2026.
 
 ## En un coup d'œil
 
@@ -34,7 +34,7 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 
 ### Priorité 2 — valeur produit
 
-6. **Résultats pendant l'audit** : enregistrer au fil de l'eau (tableau consultable en direct, mémoire bornée sur très gros sites). Lève aussi une dette.
+6. 🟡 **Résultats pendant l'audit** : ~~tableau en direct~~ fait (pages enregistrées par lots pendant l'audit, remplacées par le résultat complet à la fin ; problèmes, liens entrants et maillage restent calculés à la fin). Reste : mémoire bornée sur très gros sites (l'analyse a besoin de toutes les pages : la faire lire depuis la base).
 7. **Authentification des sites audités** : Basic, en-têtes, cookies, formulaire ; identifiants chiffrés (AES-GCM, clé `CALLISTSEO_SECRET_KEY`, fonction désactivée sans clé), jamais renvoyés ni journalisés, mêmes filtres SSRF.
 8. **Qualité des règles** : corpus `tests/fixtures` (HTML invalides, gros documents, boucles), ~~tests SSRF par redirection~~ faits (IP littérales, `localhost`, redirection vers une adresse interne non suivie), audit sur 10+ vrais sites (faux positifs), `cargo deny`, benchmark dans la CI (détection de régressions), seuils configurables en CLI, documentation des faux positifs.
 9. ~~Robustesse robots~~ fait : `robots.txt` en 5xx = tout interdit (comme Google ; `--ignore-robots` le contourne), `Retry-After` en date HTTP, `<base href>` pris en compte. `rel=nofollow` reste volontairement exploré (le lien reste dans le graphe) ; compté dans `nofollow_links`.
@@ -111,7 +111,7 @@ Sécurité en place : http/https seulement ; IP privées, loopback, link-local e
 
 - Un seul hôte crawlé par run ; pas de limite de débit commune entre audits simultanés de l'API.
 - NAT64 refusé en bloc (peut empêcher l'accès à certains sites IPv6-only).
-- Les audits ne sont enregistrés qu'à leur fin : tableau vide pendant l'audit, et un audit très gros reste entièrement en mémoire (étape 6).
+- Un audit très gros reste entièrement en mémoire jusqu'à la fin (analyse en mémoire ; étape 6).
 - Un seul jeton partagé pour l'API (pas de comptes) ; identifiants des sites audités non gérés (étape 7).
 - Banc à comptes exacts : le site synthétique n'a ni hreflang, ni sitemap, ni site tiers (règles testées en unitaire) ; quasi-doublons non vérifiés sur le corpus dense.
 - Textes des règles en double (`seo-rules/src/info.rs` et `apps/web/src/lib/rules.ts`), synchronisés à la main (étape 15).

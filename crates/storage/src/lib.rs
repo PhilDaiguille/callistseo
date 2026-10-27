@@ -4,7 +4,7 @@
 use callistseo_core::{
     CrawlConfig, CrawledPage, Issue, PageFacts, PageMeta, Severity, UrlInterner,
 };
-use rusqlite::{params, Connection, Row, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Row, Transaction};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -585,35 +585,75 @@ impl Store {
         if changed == 0 {
             return Err(format!("l'exécution {run_id} n'est plus en cours"));
         }
+        // Les pages enregistrées en direct (`add_live_pages`) sont remplacées par le résultat complet.
+        tx.execute("DELETE FROM pages WHERE run_id = ?1", [run_id])
+            .map_err(db)?;
         insert_results(&tx, run_id, pages, issues)?;
         tx.commit().map_err(db)
     }
 
+    /// Pages explorées d'une exécution en cours, visibles avant la fin (sans liens ni problèmes :
+    /// `finish_run` les remplace). Ignoré si l'exécution n'est plus `running`.
+    pub fn add_live_pages(&mut self, run_id: i64, pages: &[CrawledPage]) -> Result<()> {
+        let tx = self.conn.transaction().map_err(db)?;
+        let running: bool = tx
+            .query_row(
+                "SELECT status = 'running' FROM crawl_runs WHERE id = ?1",
+                [run_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(db)?
+            .unwrap_or(false);
+        if running {
+            let mut stmt = tx.prepare(PAGE_INSERT).map_err(db)?;
+            for p in pages {
+                insert_page(&mut stmt, run_id, p)?;
+            }
+        }
+        tx.commit().map_err(db)
+    }
+
     /// `failed` ou `cancelled`. Renvoie `false` si l'exécution n'était plus `running`.
+    /// Les pages enregistrées en direct sont effacées : un audit inachevé n'a pas de résultats.
     pub fn set_run_status(
         &mut self,
         run_id: i64,
         status: &str,
         error: Option<&str>,
     ) -> Result<bool> {
-        let changed = self
-            .conn
+        let tx = self.conn.transaction().map_err(db)?;
+        let changed = tx
             .execute(
                 "UPDATE crawl_runs SET status = ?2, finished_at = ?3, error = ?4 WHERE id = ?1 AND status = 'running'",
                 params![run_id, status, now(), error],
             )
             .map_err(db)?;
+        if changed > 0 {
+            tx.execute("DELETE FROM pages WHERE run_id = ?1", [run_id])
+                .map_err(db)?;
+        }
+        tx.commit().map_err(db)?;
         Ok(changed > 0)
     }
 
-    /// Au démarrage du serveur : une exécution encore `running` a été interrompue.
+    /// Au démarrage du serveur : une exécution encore `running` a été interrompue (ses pages
+    /// enregistrées en direct sont effacées).
     pub fn fail_stale_runs(&mut self) -> Result<usize> {
-        self.conn
+        let tx = self.conn.transaction().map_err(db)?;
+        tx.execute(
+            "DELETE FROM pages WHERE run_id IN (SELECT id FROM crawl_runs WHERE status = 'running')",
+            [],
+        )
+        .map_err(db)?;
+        let n = tx
             .execute(
                 "UPDATE crawl_runs SET status = 'failed', finished_at = ?1, error = 'interrompue (arrêt du serveur)' WHERE status = 'running'",
                 [now()],
             )
-            .map_err(db)
+            .map_err(db)?;
+        tx.commit().map_err(db)?;
+        Ok(n)
     }
 
     /// Enregistre un audit déjà terminé (atomique) ; crée le projet au besoin.
@@ -1190,73 +1230,74 @@ pub struct Inlink {
     pub title: Option<String>,
 }
 
+const PAGE_INSERT: &str = "INSERT INTO pages (run_id, url, depth, status, redirect_to, is_html, in_sitemap, \
+     title, description, h1, canonical, robots, error, ttfb_ms, total_ms, size, \
+     content_type, headers, content_hash, word_count, lang, viewport, h2, hreflang, \
+     images, images_total, json_ld, nofollow_links, extracted, simhash, amp_html, is_amp, microdata, microdata_untyped, sitemap_lastmod, anchor_empty, anchor_generic, external_broken, ai_bots_blocked) \
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
+     ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39)";
+
+/// Une ligne de `pages` (sans ses liens) ; renvoie son identifiant.
+fn insert_page(stmt: &mut rusqlite::Statement, run_id: i64, p: &CrawledPage) -> Result<i64> {
+    let h1 = serde_json::to_string(&p.meta.h1).map_err(|e| e.to_string())?;
+    let f = &p.facts;
+    stmt.insert(params![
+        run_id,
+        p.url.as_str(),
+        p.depth as i64,
+        p.status,
+        p.redirect_to.as_ref().map(Url::as_str),
+        p.is_html,
+        p.in_sitemap,
+        p.meta.title,
+        p.meta.description,
+        h1,
+        p.meta.canonical.as_ref().map(Url::as_str),
+        p.meta.robots,
+        p.error,
+        f.ttfb_ms,
+        f.total_ms,
+        f.size.map(|n| n as i64),
+        f.content_type,
+        list_json(&f.headers)?,
+        f.content_hash,
+        f.word_count,
+        f.lang,
+        f.viewport,
+        list_json(&f.h2)?,
+        list_json(&f.hreflang)?,
+        list_json(&f.images)?,
+        f.images_total,
+        list_json(&f.json_ld)?,
+        f.nofollow_links,
+        extracted_json(&f.extracted)?,
+        f.simhash,
+        f.amp_html,
+        f.is_amp,
+        f.microdata,
+        f.microdata_untyped,
+        f.sitemap_lastmod,
+        f.anchor_empty,
+        f.anchor_generic,
+        list_json(&f.external_broken)?,
+        list_json(&f.ai_bots_blocked)?,
+    ])
+    .map_err(db)
+}
+
 fn insert_results(
     tx: &Transaction,
     run_id: i64,
     pages: &[CrawledPage],
     issues: &[Issue],
 ) -> Result<()> {
-    let mut page_stmt = tx
-        .prepare(
-            "INSERT INTO pages (run_id, url, depth, status, redirect_to, is_html, in_sitemap, \
-             title, description, h1, canonical, robots, error, ttfb_ms, total_ms, size, \
-             content_type, headers, content_hash, word_count, lang, viewport, h2, hreflang, \
-             images, images_total, json_ld, nofollow_links, extracted, simhash, amp_html, is_amp, microdata, microdata_untyped, sitemap_lastmod, anchor_empty, anchor_generic, external_broken, ai_bots_blocked) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-             ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39)",
-        )
-        .map_err(db)?;
+    let mut page_stmt = tx.prepare(PAGE_INSERT).map_err(db)?;
     let mut link_stmt = tx
         .prepare("INSERT INTO links (page_id, target) VALUES (?1, ?2)")
         .map_err(db)?;
     let mut page_ids = Vec::with_capacity(pages.len());
     for p in pages {
-        let h1 = serde_json::to_string(&p.meta.h1).map_err(|e| e.to_string())?;
-        let f = &p.facts;
-        page_stmt
-            .execute(params![
-                run_id,
-                p.url.as_str(),
-                p.depth as i64,
-                p.status,
-                p.redirect_to.as_ref().map(Url::as_str),
-                p.is_html,
-                p.in_sitemap,
-                p.meta.title,
-                p.meta.description,
-                h1,
-                p.meta.canonical.as_ref().map(Url::as_str),
-                p.meta.robots,
-                p.error,
-                f.ttfb_ms,
-                f.total_ms,
-                f.size.map(|n| n as i64),
-                f.content_type,
-                list_json(&f.headers)?,
-                f.content_hash,
-                f.word_count,
-                f.lang,
-                f.viewport,
-                list_json(&f.h2)?,
-                list_json(&f.hreflang)?,
-                list_json(&f.images)?,
-                f.images_total,
-                list_json(&f.json_ld)?,
-                f.nofollow_links,
-                extracted_json(&f.extracted)?,
-                f.simhash,
-                f.amp_html,
-                f.is_amp,
-                f.microdata,
-                f.microdata_untyped,
-                f.sitemap_lastmod,
-                f.anchor_empty,
-                f.anchor_generic,
-                list_json(&f.external_broken)?,
-                list_json(&f.ai_bots_blocked)?,
-            ])
-            .map_err(db)?;
-        let page_id = tx.last_insert_rowid();
+        let page_id = insert_page(&mut page_stmt, run_id, p)?;
         page_ids.push(page_id);
         for l in &p.links {
             link_stmt
@@ -1466,19 +1507,28 @@ mod tests {
         let (pages, issues) = sample();
         let done = store.create_run(pid, &cfg).unwrap();
         assert_eq!(store.run(done).unwrap().unwrap().status, "running");
+        // Pages en direct : visibles pendant l'audit, remplacées (pas doublées) à la fin.
+        store.add_live_pages(done, &pages[..2]).unwrap();
+        assert_eq!(store.run(done).unwrap().unwrap().pages, 2);
         store.finish_run(done, &pages, &issues).unwrap();
+        assert_eq!(store.run(done).unwrap().unwrap().pages, pages.len() as i64);
+        store.add_live_pages(done, &pages).unwrap(); // lot tardif : ignoré
+        assert_eq!(store.load_run(done).unwrap().0.len(), pages.len());
         assert_eq!(store.run(done).unwrap().unwrap().status, "done");
         assert!(store.finish_run(done, &pages, &issues).is_err()); // déjà terminée
 
         let cancelled = store.create_run(pid, &cfg).unwrap();
+        store.add_live_pages(cancelled, &pages).unwrap();
         assert!(store.set_run_status(cancelled, "cancelled", None).unwrap());
         assert!(!store.set_run_status(cancelled, "failed", None).unwrap()); // état final
         assert!(store.finish_run(cancelled, &pages, &issues).is_err());
         assert_eq!(store.load_run(cancelled).unwrap().0.len(), 0);
 
         let stale = store.create_run(pid, &cfg).unwrap();
+        store.add_live_pages(stale, &pages).unwrap();
         assert_eq!(store.fail_stale_runs().unwrap(), 1);
         let r = store.run(stale).unwrap().unwrap();
+        assert_eq!(r.pages, 0);
         assert_eq!(r.status, "failed");
         assert!(r.error.unwrap().contains("interrompue"));
         assert_eq!(store.runs_of_project(pid).unwrap().len(), 3);
