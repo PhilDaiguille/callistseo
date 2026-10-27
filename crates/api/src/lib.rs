@@ -18,10 +18,11 @@ use callistseo_storage::{IssueQuery, PageQuery, RunInfo, Store};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 use tokio::task::AbortHandle;
 use url::Url;
 
@@ -44,6 +45,9 @@ pub struct ApiConfig {
     /// `index.html` pour le routage côté client. Les fichiers statiques sont publics ; `/api/…`
     /// reste protégé par le jeton.
     pub static_dir: Option<PathBuf>,
+    /// Derrière un proxy (HTTPS) : l'adresse du client est la dernière de `X-Forwarded-For`
+    /// (celle qu'ajoute le proxy). Sans proxy devant, ne pas l'activer : l'en-tête serait falsifiable.
+    pub trust_proxy: bool,
 }
 
 impl Default for ApiConfig {
@@ -57,6 +61,7 @@ impl Default for ApiConfig {
             user_agent: callistseo_core::default_user_agent(),
             min_delay_ms: 0,
             static_dir: None,
+            trust_proxy: false,
         }
     }
 }
@@ -68,6 +73,65 @@ pub struct AppState {
     store: Arc<Mutex<Store>>,
     cfg: Arc<ApiConfig>,
     running: Arc<Mutex<Running>>,
+    auth_fails: Arc<AuthLimiter>,
+}
+
+/// Échecs d'authentification par adresse : au-delà de `AUTH_FAILS` dans la fenêtre, l'adresse reçoit
+/// des 429 (sans comparaison du jeton) jusqu'à la fin de la fenêtre.
+#[derive(Default)]
+struct AuthLimiter(Mutex<HashMap<IpAddr, (Instant, u32)>>);
+
+const AUTH_FAILS: u32 = 10;
+const AUTH_WINDOW: Duration = Duration::from_secs(60);
+
+impl AuthLimiter {
+    /// Secondes d'attente restantes si `ip` est bloquée.
+    fn blocked(&self, ip: IpAddr, now: Instant) -> Option<u64> {
+        let map = lock(&self.0);
+        let (start, n) = map.get(&ip)?;
+        let elapsed = now.duration_since(*start);
+        (*n >= AUTH_FAILS && elapsed < AUTH_WINDOW)
+            .then(|| (AUTH_WINDOW - elapsed).as_secs().max(1))
+    }
+
+    fn fail(&self, ip: IpAddr, now: Instant) {
+        let mut map = lock(&self.0);
+        // ponytail: purge linéaire au-delà de 10 000 adresses ; suffisant pour un serveur d'équipe.
+        if map.len() > 10_000 {
+            map.retain(|_, (start, _)| now.duration_since(*start) < AUTH_WINDOW);
+        }
+        let entry = map.entry(ip).or_insert((now, 0));
+        if now.duration_since(entry.0) >= AUTH_WINDOW {
+            *entry = (now, 0);
+        }
+        entry.1 += 1;
+    }
+}
+
+/// Adresse du client : pair TCP, ou dernière entrée de `X-Forwarded-For` si `trust_proxy`.
+/// Sans information (appel en processus, tests), l'adresse non spécifiée sert de clé commune.
+fn client_ip(cfg: &ApiConfig, req: &Request<Body>) -> IpAddr {
+    let forwarded = || {
+        req.headers()
+            .get("x-forwarded-for")?
+            .to_str()
+            .ok()?
+            .rsplit(',')
+            .next()?
+            .trim()
+            .parse()
+            .ok()
+    };
+    let peer = || {
+        req.extensions()
+            .get::<axum::extract::ConnectInfo<SocketAddr>>()
+            .map(|c| c.0.ip())
+    };
+    cfg.trust_proxy
+        .then(forwarded)
+        .flatten()
+        .or_else(peer)
+        .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -80,6 +144,7 @@ impl AppState {
             store: Arc::new(Mutex::new(store)),
             cfg: Arc::new(cfg),
             running: Arc::default(),
+            auth_fails: Arc::default(),
         }
     }
 
@@ -131,12 +196,24 @@ fn token_eq(a: &[u8], b: &[u8]) -> bool {
 
 async fn auth(State(s): State<AppState>, req: Request<Body>, next: Next) -> Response {
     if let Some(token) = &s.cfg.token {
+        let (ip, now) = (client_ip(&s.cfg, &req), Instant::now());
+        if let Some(wait) = s.auth_fails.blocked(ip, now) {
+            let mut resp = ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "trop de tentatives, réessayez plus tard",
+            )
+            .into_response();
+            resp.headers_mut()
+                .insert(header::RETRY_AFTER, header::HeaderValue::from(wait));
+            return resp;
+        }
         let given = req
             .headers()
             .get(header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "));
         if !given.is_some_and(|g| token_eq(g.as_bytes(), token.as_bytes())) {
+            s.auth_fails.fail(ip, now);
             return ApiError::new(StatusCode::UNAUTHORIZED, "jeton manquant ou invalide")
                 .into_response();
         }
@@ -307,8 +384,9 @@ pub fn router(state: AppState) -> Router {
 /// mais le jeton voyage dans un en-tête de requête (pas dans le corps ni dans un cookie) et aucune
 /// réponse ne le contient.
 pub fn http_app(state: AppState) -> Router {
-    router(state)
+    router(state.clone())
         .layer(middleware::from_fn(cache_headers))
+        .layer(middleware::from_fn_with_state(state, access_log))
         .layer(
             tower_http::compression::CompressionLayer::new()
                 .gzip(true)
@@ -336,9 +414,49 @@ async fn cache_headers(req: Request<Body>, next: middleware::Next) -> Response {
     } else {
         "no-cache"
     };
-    resp.headers_mut().insert(
+    let h = resp.headers_mut();
+    h.insert(
         header::CACHE_CONTROL,
         header::HeaderValue::from_static(value),
+    );
+    // Interface sans script ni ressource externe (polices embarquées) : tout vient de l'origine.
+    // `style-src 'unsafe-inline'` : des composants posent des styles en ligne (positionnement).
+    h.insert(
+        header::CONTENT_SECURITY_POLICY,
+        header::HeaderValue::from_static(
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+             img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; \
+             frame-ancestors 'none'",
+        ),
+    );
+    h.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        header::HeaderValue::from_static("nosniff"),
+    );
+    h.insert(
+        header::REFERRER_POLICY,
+        header::HeaderValue::from_static("no-referrer"),
+    );
+    resp
+}
+
+/// Journal d'accès sur stderr (`docker compose logs`) : adresse, méthode, chemin sans la requête
+/// (filtres et recherches restent privés), statut, durée. La sonde de santé n'y figure pas.
+async fn access_log(State(s): State<AppState>, req: Request<Body>, next: Next) -> Response {
+    let path = req.uri().path().to_owned();
+    if path == "/api/health" {
+        return next.run(req).await;
+    }
+    let (ip, method, start) = (
+        client_ip(&s.cfg, &req),
+        req.method().clone(),
+        Instant::now(),
+    );
+    let resp = next.run(req).await;
+    eprintln!(
+        "{ip} {method} {path} {} {}ms",
+        resp.status().as_u16(),
+        start.elapsed().as_millis()
     );
     resp
 }
@@ -371,10 +489,13 @@ pub async fn serve(addr: SocketAddr, mut store: Store, cfg: ApiConfig) -> Result
     eprintln!("API sur http://{addr} (Ctrl-C pour arrêter)");
     let state = AppState::new(store, cfg);
     tokio::spawn(Scheduler(state.clone()).run());
-    axum::serve(listener, http_app(state))
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .map_err(|e| e.to_string())
+    axum::serve(
+        listener,
+        http_app(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Ctrl-C (SIGINT) ou SIGTERM : c'est ce que `docker stop` envoie, et en tant que PID 1 le
@@ -2565,6 +2686,56 @@ mod tests {
             "{status}"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn failed_logins_are_limited_per_client() {
+        use tower::ServiceExt;
+        let state = AppState::new(
+            Store::open_in_memory().unwrap(),
+            ApiConfig {
+                token: Some(TOKEN.into()),
+                trust_proxy: true,
+                ..ApiConfig::default()
+            },
+        );
+        let app = http_app(state);
+        let get = |ip: &str, token: &str| {
+            let req = Request::builder()
+                .uri("/api/projects")
+                // Le client ne choisit que le début de la liste : seule la dernière entrée compte.
+                .header("x-forwarded-for", format!("6.6.6.6, {ip}"))
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap();
+            let app = app.clone();
+            async move { app.oneshot(req).await.unwrap() }
+        };
+        for _ in 0..AUTH_FAILS {
+            assert_eq!(
+                get("1.1.1.1", "faux").await.status(),
+                StatusCode::UNAUTHORIZED
+            );
+        }
+        // Bloquée, même avec le bon jeton (pas d'oracle pendant le blocage).
+        let resp = get("1.1.1.1", TOKEN).await;
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(resp.headers().contains_key(header::RETRY_AFTER));
+        // Une autre adresse n'est pas touchée ; les en-têtes de sécurité sont posés.
+        let resp = get("2.2.2.2", TOKEN).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let csp = resp.headers()[header::CONTENT_SECURITY_POLICY]
+            .to_str()
+            .unwrap();
+        assert!(csp.contains("frame-ancestors 'none'") && csp.contains("script-src 'self'"));
+        assert_eq!(resp.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+
+        // La fenêtre passée, l'adresse est libérée.
+        let lim = AuthLimiter::default();
+        let (ip, t0) = (IpAddr::from([1, 1, 1, 1]), Instant::now());
+        (0..AUTH_FAILS).for_each(|_| lim.fail(ip, t0));
+        assert!(lim.blocked(ip, t0).is_some());
+        assert!(lim.blocked(ip, t0 + AUTH_WINDOW).is_none());
     }
 
     #[tokio::test]
