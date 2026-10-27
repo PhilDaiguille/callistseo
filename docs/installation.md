@@ -24,7 +24,7 @@ pnpm --filter desktop dev       # développement
 pnpm --filter desktop build     # bundle (.app/.dmg, .exe/.msi, .deb/.AppImage)
 ```
 
-Aucun port réseau, aucun jeton : les audits sont dans le dossier de données de l'application (`audits.db`). Les installateurs ne sont pas signés : SmartScreen (Windows) et Gatekeeper (macOS) afficheront un avertissement. Seul macOS a été testé.
+Aucun port réseau, aucun jeton : les audits sont dans le dossier de données de l'application (`audits.db`), avec `secret.key` (clé des identifiants des sites protégés, créée au premier lancement). Les installateurs ne sont pas signés : SmartScreen (Windows) et Gatekeeper (macOS) afficheront un avertissement. Seul macOS a été testé.
 
 ## 3. Version web (Docker Compose)
 
@@ -40,6 +40,7 @@ docker compose up -d --build    # http://127.0.0.1:8080
 - Le port n'est publié que sur `127.0.0.1`. Pour l'exposer, utilisez le **proxy HTTPS** fourni (en HTTP le jeton circule en clair) : dans `.env`, `CALLISTSEO_DOMAIN=seo.votre-site.fr` et `CALLISTSEO_TRUST_PROXY=1`, DNS pointé sur la machine, ports 80/443 ouverts, puis `docker compose --profile https up -d`. Caddy obtient et renouvelle le certificat.
 - Image publiée (amd64 et arm64, à chaque version) : `CALLISTSEO_IMAGE=ghcr.io/<propriétaire>/callistseo:latest` dans `.env`, puis `docker compose pull && docker compose up -d` (sans `--build`).
 - Protections : CSP stricte sur l'interface, 10 tentatives de connexion ratées par minute et par adresse (puis 429), journal d'accès sur la sortie d'erreur (`docker compose logs callistseo` : adresse, méthode, chemin sans paramètres, statut, durée).
+- Sites protégés (identifiants Basic, en-têtes, cookies) : `CALLISTSEO_SECRET_KEY=$(openssl rand -hex 32)` dans `.env`. Les identifiants sont chiffrés en base avec cette clé ; sans elle, la fonction est désactivée. Gardez-la à part de la sauvegarde du volume : perdue ou changée, il faut ressaisir les identifiants (les audits de ces projets sont refusés en attendant).
 - Sauvegarde : copiez le volume `callistseo_callistseo-data` (base SQLite).
 - Version : affichée dans l'en-tête de l'interface et par `GET /api/health` (`{"status":"ok","version":"…"}`).
 - Mise à jour : `git pull && docker compose up -d --build`, ou `docker compose pull && docker compose up -d` avec l'image publiée (les migrations de la base sont automatiques et ne suppriment rien). Avant de migrer, le serveur copie la base à côté d'elle : `audits.db.avant-v<N>.bak` dans le volume.

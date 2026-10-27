@@ -229,6 +229,22 @@ export interface ProjectConfig {
   extractors: ExtractorDef[]
 }
 
+/** État des identifiants d'un projet : jamais leurs valeurs. */
+export interface SiteAuthState {
+  available: boolean
+  configured: boolean
+  readable: boolean
+  basic: boolean
+  headers: number
+  cookies: boolean
+}
+
+export interface SiteAuthBody {
+  basic?: { user: string; password: string }
+  headers: { name: string; value: string }[]
+  cookies?: string
+}
+
 export interface Schedule {
   interval_minutes: number
   enabled: boolean
@@ -350,6 +366,9 @@ export const api = {
   schedule: (id: number) => request<Schedule | null>(`/api/projects/${id}/schedule`),
   saveSchedule: (id: number, body: { interval_minutes: number; enabled: boolean }) =>
     request<Schedule>(`/api/projects/${id}/schedule`, { method: 'PUT', body }),
+  siteAuth: (id: number) => request<SiteAuthState>(`/api/projects/${id}/auth`),
+  saveSiteAuth: (id: number, body: SiteAuthBody) => request<null>(`/api/projects/${id}/auth`, { method: 'PUT', body }),
+  deleteSiteAuth: (id: number) => request<null>(`/api/projects/${id}/auth`, { method: 'DELETE' }),
   deleteSchedule: (id: number) => request<null>(`/api/projects/${id}/schedule`, { method: 'DELETE' }),
   crawl: (id: number) => request<Crawl>(`/api/crawls/${id}`),
   diff: (before: number, after: number) => request<DiffResult>(`/api/crawls/${before}/diff/${after}`),

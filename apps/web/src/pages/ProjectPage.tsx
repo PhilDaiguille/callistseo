@@ -5,6 +5,7 @@ import { RunBadge } from '@/components/Badges'
 import { DeleteProject } from '@/components/DeleteProject'
 import { ProjectConfigCard } from '@/components/ProjectConfigCard'
 import { ScheduleCard } from '@/components/ScheduleCard'
+import { SiteAuthCard } from '@/components/SiteAuthCard'
 import { QueryError } from '@/components/QueryError'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -67,7 +68,12 @@ export function ProjectPage() {
       </Tabs>
 
       {tab === 'schedule' && <ScheduleCard projectId={id} />}
-      {tab === 'config' && <ProjectConfigCard projectId={id} />}
+      {tab === 'config' && (
+        <div className="grid gap-4">
+          <ProjectConfigCard projectId={id} />
+          <SiteAuthCard projectId={id} />
+        </div>
+      )}
 
       {tab === 'audits' && (
       <Card>

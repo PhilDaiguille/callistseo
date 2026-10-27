@@ -17,6 +17,8 @@ services:
       # Facultatif : identifiant du robot, avec votre URL de contact (voir .env.example).
       CALLISTSEO_USER_AGENT: ${CALLISTSEO_USER_AGENT:-}
       CALLISTSEO_TOKEN: ${CALLISTSEO_TOKEN:?Définissez CALLISTSEO_TOKEN (16 caractères minimum), voir .env.example}
+      # Facultatif : chiffre les identifiants des sites protégés (sans elle, la fonction est désactivée).
+      CALLISTSEO_SECRET_KEY: ${CALLISTSEO_SECRET_KEY:-}
       # 1 avec le profil https : l'adresse du client vient du proxy (journal, limite de connexion).
       CALLISTSEO_TRUST_PROXY: ${CALLISTSEO_TRUST_PROXY:-0}
     volumes:

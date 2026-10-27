@@ -11,7 +11,7 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 | --- | --- | --- |
 | Moteur de crawl (SSRF, robots, politesse, adaptatif) | ✅ | concurrence adaptative, pause / arrêt, périmètre par regex |
 | Règles SEO | ✅ 59 règles | dont un lot IA/GEO 2026 ; reste : rendu JS, orthographe |
-| Stockage et historique | ✅ | SQLite, migrations v1→v13, comparaison d'audits |
+| Stockage et historique | ✅ | SQLite, migrations v1→v14, comparaison d'audits |
 | API | ✅ | projets, audits, rapports, segments, planification, configuration |
 | MCP (assistants IA) | ✅ | `callistseo mcp` : 13 outils ; reste : transport HTTP, ressources |
 | Interface web | ✅ | poste de travail, palette ⌘K, thème clair/sombre, mobile |
@@ -36,7 +36,7 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 ### Priorité 2 — valeur produit
 
 6. 🟡 **Résultats pendant l'audit** : ~~tableau en direct~~ fait (pages enregistrées par lots pendant l'audit, remplacées par le résultat complet à la fin ; problèmes, liens entrants et maillage restent calculés à la fin). Reste : mémoire bornée sur très gros sites (l'analyse a besoin de toutes les pages : la faire lire depuis la base).
-7. **Authentification des sites audités** : Basic, en-têtes, cookies, formulaire ; identifiants chiffrés (AES-GCM, clé `CALLISTSEO_SECRET_KEY`, fonction désactivée sans clé), jamais renvoyés ni journalisés, mêmes filtres SSRF.
+7. 🟡 **Authentification des sites audités** : fait : Basic, en-têtes, cookies, envoyés à la seule origine du projet ; chiffrés (AES-256-GCM, `CALLISTSEO_SECRET_KEY`, fonction désactivée sans clé ; desktop : clé locale `secret.key`), jamais renvoyés ni journalisés ; CLI `--basic-auth` / `--header` / `--cookie`. Reste : connexion par formulaire (identifiant + mot de passe postés, cookie récupéré ; le cookie copié du navigateur la remplace en attendant), clé desktop dans le trousseau du système.
 8. 🟡 **Qualité des règles** : faits : tests SSRF par redirection, corpus `crates/crawler/tests/fixtures` (HTML invalide, métadonnées absurdes, document vide, JSON servi en HTML, page de 7 Mo, 50 000 niveaux d'imbrication, redirection vers soi, `Location` invalide, faux gzip), `cargo deny` dans la CI (licences, failles, sources ; a corrigé RUSTSEC-2026-0384 dans tokio), banc à comptes exacts dans la CI, seuils réglables en CLI (`--title-max`, `--min-words`…). Le corpus a révélé un temps quadratique de l'analyseur HTML sur l'imbrication profonde (8 s pour 100 000 niveaux) : document coupé au-delà de 1 000 niveaux. Reste : audit sur 10+ vrais sites (faux positifs) et leur documentation, détection de régressions de performance (le banc ne vérifie que l'exactitude).
 9. ~~Robustesse robots~~ fait : `robots.txt` en 5xx = tout interdit (comme Google ; `--ignore-robots` le contourne), `Retry-After` en date HTTP, `<base href>` pris en compte. `rel=nofollow` reste volontairement exploré (le lien reste dans le graphe) ; compté dans `nofollow_links`.
 10. **Suivi des régressions** : comparaison avec l'audit précédent poussée à l'utilisateur (webhook / e-mail), calendrier jour et heure au lieu d'un simple intervalle, tendances sur plusieurs audits, diff en JSON/CSV.
@@ -63,7 +63,7 @@ Rendu JavaScript (Chrome piloté + proxy appliquant le filtre anti-SSRF), JavaSc
 | 2 | Données par URL (schéma v3) : temps de réponse, taille, empreinte du texte, mots, langue, en-têtes, hreflang, images, JSON-LD, H2, viewport | ✅ |
 | 3 | 59 règles SEO + sitemap XML : quasi-doublons (simhash), liens externes (`--check-external`), AMP, microdata, JSON-LD par type, `lastmod`, ancres, benchmark à comptes exacts | ✅ |
 | 4 | Poste de travail : 22 rapports, tableau virtualisé, inspecteur, ⌘K, pause / reprise / arrêt | ✅ |
-| 5 | Configuration : périmètre par projet, robots.txt d'essai, planification, segments, extraction personnalisée | 🟡 reste : authentification, XPath |
+| 5 | Configuration : périmètre par projet, robots.txt d'essai, planification, segments, extraction personnalisée, sites protégés (Basic, en-têtes, cookies) | 🟡 reste : connexion par formulaire, XPath |
 | 6 | Intégrations externes | ⬜ |
 | 7 | Rendu JavaScript et le reste | ⏸ |
 
@@ -113,7 +113,7 @@ Sécurité en place : http/https seulement ; IP privées, loopback, link-local e
 - Un seul hôte crawlé par run ; pas de limite de débit commune entre audits simultanés de l'API.
 - NAT64 refusé en bloc (peut empêcher l'accès à certains sites IPv6-only).
 - Un audit très gros reste entièrement en mémoire jusqu'à la fin (analyse en mémoire ; étape 6).
-- Un seul jeton partagé pour l'API (pas de comptes) ; identifiants des sites audités non gérés (étape 7).
+- Un seul jeton partagé pour l'API (pas de comptes).
 - Banc à comptes exacts : le site synthétique n'a ni hreflang, ni sitemap, ni site tiers (règles testées en unitaire) ; quasi-doublons non vérifiés sur le corpus dense.
 - Textes des règles en double (`seo-rules/src/info.rs` et `apps/web/src/lib/rules.ts`), synchronisés à la main (étape 15).
 - Dépendances indirectes signalées comme non maintenues (`fxhash`, `proc-macro-error`, `glib` 0.18) : elles viennent de Tauri et `scraper` ; `cargo deny` (CI) ne fait échouer que les failles.
