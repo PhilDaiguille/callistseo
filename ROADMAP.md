@@ -1,7 +1,7 @@
 # CallistSEO — Roadmap
 
 Document de suivi, mis à jour à chaque jalon. Légende : ✅ fait · 🟡 partiel · ⬜ à faire · ⏸ reporté.
-Dernière mise à jour : 26 oct. 2026.
+Dernière mise à jour : 27 oct. 2026.
 
 ## En un coup d'œil
 
@@ -16,7 +16,7 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 | MCP (assistants IA) | ✅ | `callistseo mcp` : 13 outils ; reste : transport HTTP, ressources |
 | Interface web | ✅ | poste de travail, palette ⌘K, thème clair/sombre, mobile |
 | Desktop (Tauri) | 🟡 | fonctionne en processus ; release sur tag `v*` ; reste : essais Windows/Linux, signature |
-| Docker / web | 🟡 | image durcie, connexion d'équipe (mot de passe partagé) ; reste : HTTPS, image publiée, comptes |
+| Docker / web | 🟡 | image durcie et publiée (ghcr), HTTPS par Caddy, CSP, limite de connexion, journal d'accès ; reste : comptes |
 | Site vitrine | ✅ | `site/index.html` autonome ; reste : domaine et publication |
 | Performance et mémoire | ✅ | 49 Mo pour 6 000 pages denses, banc reproductible |
 | Intégrations externes | ⬜ | phase 6 |
@@ -28,9 +28,10 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 
 1. **Nom, dépôt, domaine** à valider (marques, juridique), puis URL d'information du robot (`--user-agent`), identifiant Tauri `org.callistseo.desktop`, domaine du site vitrine.
 2. ~~Documents de projet~~ faits : `SECURITY.md`, `CONTRIBUTING.md`, `docs/installation.md` (adresse de contact de sécurité : signalement privé GitHub, à confirmer une fois le dépôt définitif).
-3. **Déploiement web** : image publiée (registre) multi-architectures, HTTPS documenté (proxy dans le compose), CSP sur l'interface, limitation de débit, journal d'accès.
-4. **Desktop** : essais réels Windows / Linux (builds de `release.yml` jamais lancés sur une vraie machine), validation visuelle de la fenêtre et des exports natifs, signature / notarisation, icône définitive, mise à jour automatique.
+3. ~~Déploiement web~~ fait : image `ghcr.io` amd64/arm64 publiée sur tag `v*` (`docker.yml`, jamais lancé), profil `https` (Caddy) dans le compose, CSP et en-têtes de sécurité, 10 échecs de connexion par minute et par adresse, journal d'accès. Reste : premier tag pour vérifier la publication.
+4. **Desktop** : essais réels Windows / Linux (builds de `release.yml` jamais lancés sur une vraie machine), validation visuelle de la fenêtre et des exports natifs, signature / notarisation, icône définitive (mise à jour : étape 5 bis).
 5. **Validation terrain** : 5 testeurs professionnels, dont 3 réutilisent l'outil sur un autre site.
+5 bis. **Mise à jour du service** : desktop (updater Tauri, artefacts signés, vérification au lancement), web (version affichée dans l'interface et `/api/health`, notification quand une nouvelle version existe, procédure documentée `docker compose pull && up -d`, migrations de base automatiques et sauvegarde avant migration, retour arrière).
 
 ### Priorité 2 — valeur produit
 
@@ -102,7 +103,7 @@ Sécurité en place : http/https seulement ; IP privées, loopback, link-local e
 | 014 | Explorateur d'URL + centre de problèmes | 🟡 | reste : graphe, tests de composants, accessibilité (étapes 12, 15) |
 | 015 | Tauri 2 + adaptateur desktop | 🟡 | backend en processus (`LocalApi`), aucun port ouvert ; testé sur macOS ; reste : étape 4 |
 | 016 | Exports CSV, JSON, HTML | ✅ | CSV neutralisé contre l'injection de formules, HTML autonome sans script ; reste : étape 16 |
-| 017 | Docker Compose + web | 🟡 | conteneur durci, jeton obligatoire, sonde de santé ; testé Docker 29 ; reste : étape 3 et comptes nominatifs |
+| 017 | Docker Compose + web | 🟡 | conteneur durci, jeton obligatoire, sonde de santé, HTTPS (Caddy), image publiée ; testé Docker 29 ; reste : comptes nominatifs |
 | 018 | Benchmarks reproductibles | ✅ | `callistseo-bench`, 54/54 comptes exacts, ≈ 42 000 pages/s, ≈ 2,1 Ko/page (Apple M5) ; reste : autres machines, scénarios lourds, CI (étape 8) |
 | 019 | Similarités et clusters de pages | ⬜ | étape 17 |
 | 020 | Import Google Search Console | ⬜ | étape 11 |

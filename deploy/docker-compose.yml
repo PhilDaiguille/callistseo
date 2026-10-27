@@ -7,7 +7,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    image: callistseo:local
+    image: ${CALLISTSEO_IMAGE:-callistseo:local}
     restart: unless-stopped
     ports:
       # Local par défaut. Pour exposer le service, placez-le derrière un proxy HTTPS (le jeton
@@ -17,6 +17,8 @@ services:
       # Facultatif : identifiant du robot, avec votre URL de contact (voir .env.example).
       CALLISTSEO_USER_AGENT: ${CALLISTSEO_USER_AGENT:-}
       CALLISTSEO_TOKEN: ${CALLISTSEO_TOKEN:?Définissez CALLISTSEO_TOKEN (16 caractères minimum), voir .env.example}
+      # 1 avec le profil https : l'adresse du client vient du proxy (journal, limite de connexion).
+      CALLISTSEO_TRUST_PROXY: ${CALLISTSEO_TRUST_PROXY:-0}
     volumes:
       - callistseo-data:/data
     read_only: true
@@ -27,5 +29,29 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # HTTPS automatique (Let's Encrypt) : `docker compose --profile https up -d`, avec CALLISTSEO_DOMAIN
+  # (DNS pointé sur la machine, ports 80 et 443 ouverts) et CALLISTSEO_TRUST_PROXY=1 dans .env.
+  caddy:
+    image: caddy:2
+    profiles: [https]
+    restart: unless-stopped
+    depends_on: [callistseo]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      CALLISTSEO_DOMAIN: ${CALLISTSEO_DOMAIN:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   callistseo-data:
+  caddy-data:

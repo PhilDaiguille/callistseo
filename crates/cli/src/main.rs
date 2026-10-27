@@ -124,6 +124,10 @@ enum Command {
         /// Identifiant du robot pour tous les audits (sinon CALLISTSEO_USER_AGENT, sinon par défaut)
         #[arg(long)]
         user_agent: Option<String>,
+        /// Derrière un proxy HTTPS : l'adresse du client vient de X-Forwarded-For (journal, limite
+        /// des tentatives de connexion) ; sinon la variable CALLISTSEO_TRUST_PROXY=1
+        #[arg(long)]
+        trust_proxy: bool,
     },
     /// Serveur MCP sur stdio : un assistant lance des audits et interroge les résultats
     Mcp {
@@ -448,11 +452,14 @@ async fn run(cmd: Command) -> Result<ExitCode, String> {
             token,
             static_dir,
             user_agent,
+            trust_proxy,
         } => {
             let token = token.or_else(|| std::env::var("CALLISTSEO_TOKEN").ok());
             let cfg = callistseo_api::ApiConfig {
                 token,
                 static_dir,
+                trust_proxy: trust_proxy
+                    || std::env::var("CALLISTSEO_TRUST_PROXY").is_ok_and(|v| v == "1"),
                 user_agent: resolve_user_agent(user_agent),
                 ..Default::default()
             };

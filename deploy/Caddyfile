@@ -1,0 +1,6 @@
+# Proxy HTTPS du profil `https` (docker-compose.yml). Certificat obtenu et renouvelé par Caddy.
+{$CALLISTSEO_DOMAIN} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy callistseo:8080
+}

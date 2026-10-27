@@ -90,11 +90,13 @@ docker compose up -d --build    # interface et API sur http://127.0.0.1:8080
 ```
 
 - **Jeton obligatoire** : sans `CALLISTSEO_TOKEN` (16 caractères minimum), Compose refuse de démarrer et le serveur aussi. C'est le mot de passe de l'équipe, demandé par l'écran de connexion (voir « Accès d'équipe »).
-- **Local par défaut** : le port n'est publié que sur `127.0.0.1`. Pour l'exposer, placez le service derrière un proxy HTTPS : le jeton circule en clair sur HTTP.
+- **Local par défaut** : le port n'est publié que sur `127.0.0.1`. Pour l'exposer : profil `https` (Caddy, certificat automatique), `docker compose --profile https up -d` avec `CALLISTSEO_DOMAIN` et `CALLISTSEO_TRUST_PROXY=1` dans `.env`. Sans HTTPS, le jeton circule en clair.
+- **Image publiée** : chaque tag `v*` publie `ghcr.io/<propriétaire>/<dépôt>` (amd64, arm64) ; `CALLISTSEO_IMAGE` dans `.env` pour l'utiliser au lieu d'un build local.
+- **Protections HTTP** : CSP stricte (aucun script ni ressource externe), `nosniff`, `no-referrer`, interdiction d'affichage en cadre ; 10 tentatives de connexion ratées par minute et par adresse, puis 429 ; journal d'accès sur stderr (`docker compose logs`), sans les paramètres d'URL.
 - **Durci** : utilisateur non-root, système de fichiers en lecture seule (sauf `/data`), aucune capacité Linux, `no-new-privileges`. Les destinations privées (dont les adresses internes du réseau Docker et les métadonnées cloud) sont refusées par le crawler.
 - **Sonde de santé** : `GET /api/health` (publique). Arrêt propre sur SIGTERM.
 - **Sauvegarde** : copiez le volume `callistseo_callistseo-data` (base SQLite `audits.db`).
-- **Limites connues** : une seule instance (SQLite), pas de comptes utilisateurs (un jeton partagé), pas de HTTPS intégré, pas de journal d'accès.
+- **Limites connues** : une seule instance (SQLite), pas de comptes utilisateurs (un jeton partagé).
 
 ## Serveur MCP (assistants IA)
 

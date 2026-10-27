@@ -37,9 +37,11 @@ docker compose up -d --build    # http://127.0.0.1:8080
 ```
 
 - Le jeton est le mot de passe partagé de l'équipe (écran de connexion).
-- Le port n'est publié que sur `127.0.0.1`. Pour l'exposer, placez un **proxy HTTPS** devant : en HTTP le jeton circule en clair.
+- Le port n'est publié que sur `127.0.0.1`. Pour l'exposer, utilisez le **proxy HTTPS** fourni (en HTTP le jeton circule en clair) : dans `.env`, `CALLISTSEO_DOMAIN=seo.votre-site.fr` et `CALLISTSEO_TRUST_PROXY=1`, DNS pointé sur la machine, ports 80/443 ouverts, puis `docker compose --profile https up -d`. Caddy obtient et renouvelle le certificat.
+- Image publiée (amd64 et arm64, à chaque version) : `CALLISTSEO_IMAGE=ghcr.io/<propriétaire>/callistseo:latest` dans `.env`, puis `docker compose pull && docker compose up -d` (sans `--build`).
+- Protections : CSP stricte sur l'interface, 10 tentatives de connexion ratées par minute et par adresse (puis 429), journal d'accès sur la sortie d'erreur (`docker compose logs callistseo` : adresse, méthode, chemin sans paramètres, statut, durée).
 - Sauvegarde : copiez le volume `callistseo_callistseo-data` (base SQLite).
-- Mise à jour : `git pull && docker compose up -d --build` (les migrations de la base sont automatiques et ne suppriment rien).
+- Mise à jour : `git pull && docker compose up -d --build`, ou `docker compose pull && docker compose up -d` avec l'image publiée (les migrations de la base sont automatiques et ne suppriment rien).
 
 ## Dépannage
 
