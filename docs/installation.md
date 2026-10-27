@@ -41,7 +41,9 @@ docker compose up -d --build    # http://127.0.0.1:8080
 - Image publiée (amd64 et arm64, à chaque version) : `CALLISTSEO_IMAGE=ghcr.io/<propriétaire>/callistseo:latest` dans `.env`, puis `docker compose pull && docker compose up -d` (sans `--build`).
 - Protections : CSP stricte sur l'interface, 10 tentatives de connexion ratées par minute et par adresse (puis 429), journal d'accès sur la sortie d'erreur (`docker compose logs callistseo` : adresse, méthode, chemin sans paramètres, statut, durée).
 - Sauvegarde : copiez le volume `callistseo_callistseo-data` (base SQLite).
-- Mise à jour : `git pull && docker compose up -d --build`, ou `docker compose pull && docker compose up -d` avec l'image publiée (les migrations de la base sont automatiques et ne suppriment rien).
+- Version : affichée dans l'en-tête de l'interface et par `GET /api/health` (`{"status":"ok","version":"…"}`).
+- Mise à jour : `git pull && docker compose up -d --build`, ou `docker compose pull && docker compose up -d` avec l'image publiée (les migrations de la base sont automatiques et ne suppriment rien). Avant de migrer, le serveur copie la base à côté d'elle : `audits.db.avant-v<N>.bak` dans le volume.
+- Retour arrière : arrêtez le service (`docker compose down`), remplacez `audits.db` par la copie `.bak` (et supprimez `audits.db-wal` / `audits.db-shm`), puis relancez l'ancienne version. Les audits faits depuis la mise à jour sont perdus. Une base créée par une version plus récente est refusée au démarrage (jamais modifiée).
 
 ## Dépannage
 
