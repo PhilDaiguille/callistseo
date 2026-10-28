@@ -30,6 +30,6 @@ L'app desktop n'est pas dans `cargo test` (elle exige `apps/web/dist`) : `make w
 - **Sécurité du crawler** : ne jamais exposer `allow_private` par l'API ; les redirections ne sont pas suivies en place.
 - **Composants `components/ui/`** : adaptés dans le dépôt, ne lancez pas `shadcn add` par-dessus.
 - Les erreurs Rust sont des `String` ; pas de nouvelle dépendance pour ce que quelques lignes font.
-- **Mises à jour des dépendances** : Renovate (`renovate.json`), au plus une fois toutes les 2 h, versions publiées depuis 3 jours au moins. Une PR groupée pour les mineures et correctifs, fusionnée seule si la CI passe ; une PR groupée pour les majeures, à relire et fusionner à la main.
+- **Mises à jour des dépendances** : Renovate (`renovate.json`), au plus une fois toutes les 2 h, versions publiées depuis 3 jours au moins, sans limite de nombre de PR. Une PR groupée pour les mineures et correctifs, fusionnée seule si la CI passe ; une PR groupée pour les majeures, à relire et fusionner à la main.
 
 Détail de l'architecture : [`CLAUDE.md`](CLAUDE.md). Failles de sécurité : voir [`SECURITY.md`](SECURITY.md), pas d'issue publique.
