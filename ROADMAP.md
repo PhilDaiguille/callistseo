@@ -31,7 +31,7 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 3. ~~Déploiement web~~ fait : image `ghcr.io` amd64/arm64 publiée sur tag `v*` (`docker.yml`, jamais lancé), profil `https` (Caddy) dans le compose, CSP et en-têtes de sécurité, 10 échecs de connexion par minute et par adresse, journal d'accès. Reste : premier tag pour vérifier la publication.
 4. **Desktop** : essais réels Windows / Linux (builds de `release.yml` jamais lancés sur une vraie machine), validation visuelle de la fenêtre et des exports natifs, signature / notarisation, icône définitive (mise à jour : étape 5 bis).
 5. **Validation terrain** : 5 testeurs professionnels, dont 3 réutilisent l'outil sur un autre site.
-5 bis. 🟡 **Mise à jour du service** : web fait (version dans l'interface et `/api/health`, `docker compose pull && up -d` documenté, migrations automatiques avec copie `audits.db.avant-v<N>.bak`, retour arrière documenté). Reste : desktop (updater Tauri, exige des artefacts signés : étape 4), notification d'une nouvelle version (appel sortant vers GitHub, à décider).
+5 bis. 🟡 **Mise à jour du service** : web fait (version dans l'interface et `/api/health`, `docker compose pull && up -d` documenté, migrations automatiques avec copie `audits.db.avant-v<N>.bak`, retour arrière documenté). Desktop : vérification au démarrage (updater Tauri, bannière, installation sur clic) ; un appel sortant vers GitHub Releases à chaque lancement. Reste : générer la clé de signature (`pubkey` dans `tauri.conf.json`, secrets `TAURI_SIGNING_PRIVATE_KEY` et `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) et publier la release (le brouillon n'est pas visible de `releases/latest`).
 
 ### Priorité 2 — valeur produit
 
