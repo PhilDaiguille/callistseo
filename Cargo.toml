@@ -21,7 +21,7 @@ license = "MIT"
 [workspace.dependencies]
 url = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "gzip", "brotli", "deflate"] }
-scraper = "0.20"
+reqwest = { version = "0.13", default-features = false, features = ["rustls-tls", "http2", "gzip", "brotli", "deflate"] }
+scraper = "0.29"
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }
