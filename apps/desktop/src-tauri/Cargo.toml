@@ -12,8 +12,12 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 url.workspace = true
+# Requis par `tauri::generate_context!` dès qu'une section `plugins` existe (config de l'updater).
+serde_json.workspace = true
 callistseo-api = { path = "../../../crates/api" }
 callistseo-storage = { path = "../../../crates/storage" }
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [features]
 # Activé par `tauri build` : l'interface est embarquée au lieu d'être servie par `devUrl`.

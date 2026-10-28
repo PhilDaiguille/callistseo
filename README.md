@@ -142,6 +142,8 @@ Prérequis : Rust stable, Node, pnpm, et sous Linux les dépendances système de
 
 **Publier une version** : mettre la version dans `apps/desktop/src-tauri/tauri.conf.json`, puis pousser le tag correspondant (`git tag v0.1.0 && git push origin v0.1.0`). Le workflow `.github/workflows/release.yml` compile Windows (`.exe`, `.msi`), macOS (Apple Silicon et Intel, `.dmg`) et Linux (`.deb`, `.rpm`, `.AppImage`), et crée un **brouillon** de release avec ces fichiers : à relire, puis publier. Le workflow échoue si le tag ne correspond pas à la version. Les installateurs ne sont pas encore signés : Windows (SmartScreen) et macOS (Gatekeeper) afficheront un avertissement.
 
+**Mise à jour** : au démarrage, l'application interroge GitHub Releases (`latest.json`) et propose la version plus récente ; rien n'est installé sans clic. C'est le seul appel sortant de l'application desktop (hors ligne, il est ignoré). Les mises à jour sont signées avec une clé Tauri (distincte de la signature Windows/macOS) : `pnpm tauri signer generate`, clé publique dans `tauri.conf.json`, clé privée et son mot de passe dans les secrets GitHub `TAURI_SIGNING_PRIVATE_KEY` et `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Une release en brouillon ou en pré-version n'est pas proposée : publier la release pour la rendre disponible.
+
 ## Benchmarks
 
 Un corpus synthétique déterministe (défauts injectés en nombre connu) mesure le débit, la mémoire maximale, la latence et l'exactitude des règles. Résultats et méthode : [`docs/benchmarks.md`](docs/benchmarks.md).

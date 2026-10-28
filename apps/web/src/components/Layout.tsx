@@ -4,6 +4,7 @@ import { LogOut, Monitor, Moon, Sun } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Mascot } from '@/components/Mascot'
+import { UpdateBanner } from '@/components/UpdateBanner'
 import { api, getToken, setToken } from '@/lib/api'
 import { applyTheme, loadPreference, nextPreference, savePreference, type ThemePreference } from '@/lib/theme'
 import { cn } from '@/lib/utils'
@@ -101,6 +102,7 @@ export function Layout() {
           </div>
         </div>
       </header>
+      {isDesktop && <UpdateBanner />}
       <main id="contenu" tabIndex={-1} className={cn('outline-none', 'mx-auto w-full px-4', wide ? 'py-4 lg:min-h-0 lg:flex-1' : 'max-w-7xl py-8')}>
         <Outlet />
       </main>

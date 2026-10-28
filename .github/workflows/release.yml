@@ -52,10 +52,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # L'interface est construite par `beforeBuildCommand` (tauri.conf.json).
-      # ponytail: binaires non signés (avertissement SmartScreen / Gatekeeper) ; ajouter les secrets de signature quand ils existeront.
+      # Les secrets signent les mises à jour (latest.json, .sig) : clé générée par `pnpm tauri signer generate`.
+      # ponytail: binaires non signés (avertissement SmartScreen / Gatekeeper) ; ajouter les secrets de signature OS quand ils existeront.
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           tauriScript: pnpm tauri
