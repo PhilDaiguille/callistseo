@@ -37,7 +37,7 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 
 6. 🟡 **Résultats pendant l'audit** : ~~tableau en direct~~ fait (pages enregistrées par lots pendant l'audit, remplacées par le résultat complet à la fin ; problèmes, liens entrants et maillage restent calculés à la fin). Reste : mémoire bornée sur très gros sites (l'analyse a besoin de toutes les pages : la faire lire depuis la base).
 7. **Authentification des sites audités** : Basic, en-têtes, cookies, formulaire ; identifiants chiffrés (AES-GCM, clé `CALLISTSEO_SECRET_KEY`, fonction désactivée sans clé), jamais renvoyés ni journalisés, mêmes filtres SSRF.
-8. **Qualité des règles** : corpus `tests/fixtures` (HTML invalides, gros documents, boucles), ~~tests SSRF par redirection~~ faits (IP littérales, `localhost`, redirection vers une adresse interne non suivie), audit sur 10+ vrais sites (faux positifs), `cargo deny`, benchmark dans la CI (détection de régressions), seuils configurables en CLI, documentation des faux positifs.
+8. 🟡 **Qualité des règles** : faits : tests SSRF par redirection, corpus `crates/crawler/tests/fixtures` (HTML invalide, métadonnées absurdes, document vide, JSON servi en HTML, page de 7 Mo, 50 000 niveaux d'imbrication, redirection vers soi, `Location` invalide, faux gzip), `cargo deny` dans la CI (licences, failles, sources ; a corrigé RUSTSEC-2026-0384 dans tokio), banc à comptes exacts dans la CI, seuils réglables en CLI (`--title-max`, `--min-words`…). Le corpus a révélé un temps quadratique de l'analyseur HTML sur l'imbrication profonde (8 s pour 100 000 niveaux) : document coupé au-delà de 1 000 niveaux. Reste : audit sur 10+ vrais sites (faux positifs) et leur documentation, détection de régressions de performance (le banc ne vérifie que l'exactitude).
 9. ~~Robustesse robots~~ fait : `robots.txt` en 5xx = tout interdit (comme Google ; `--ignore-robots` le contourne), `Retry-After` en date HTTP, `<base href>` pris en compte. `rel=nofollow` reste volontairement exploré (le lien reste dans le graphe) ; compté dans `nofollow_links`.
 10. **Suivi des régressions** : comparaison avec l'audit précédent poussée à l'utilisateur (webhook / e-mail), calendrier jour et heure au lieu d'un simple intervalle, tendances sur plusieurs audits, diff en JSON/CSV.
 
@@ -81,7 +81,7 @@ callistseo crawl <url> [--max-pages --max-depth --concurrency --allow-private --
 
 Sortie : `statut  profondeur  url  note  h1=N  title`. Code retour 0 / 1 (erreurs 4xx, 5xx ou réseau) / 2 (appel invalide).
 
-Sécurité en place : http/https seulement ; IP privées, loopback, link-local et réservées refusées après résolution DNS (anti-rebinding, connexion sur les adresses filtrées) ; pas de proxy système ; redirections non suivies en place (la cible repasse par la file) ; limites de pages, profondeur, concurrence, délai et taille de réponse.
+Sécurité en place : http/https seulement ; IP privées, loopback, link-local et réservées refusées après résolution DNS (anti-rebinding, connexion sur les adresses filtrées) ; pas de proxy système ; redirections non suivies en place (la cible repasse par la file) ; limites de pages, profondeur, concurrence, délai, taille de réponse et imbrication HTML (1 000 niveaux).
 
 ## Backlog historique (issues 001–020)
 
@@ -93,10 +93,10 @@ Sécurité en place : http/https seulement ; IP privées, loopback, link-local e
 | 004 | File de crawl + déduplication | ✅ | `Crawl-delay`, `--delay-ms`, pause sur 429/503 (`Retry-After` secondes ou date) |
 | 005 | Découverte de liens + profondeur | ✅ | `<base href>` pris en compte ; `rel=nofollow` exploré volontairement |
 | 006 | Métadonnées et directives SEO | ✅ | `X-Robots-Tag`, hreflang ; Open Graph si besoin |
-| 007 | Corpus de fixtures + tests | 🟡 | tests SSRF faits ; reste le dossier `tests/fixtures` (étape 8) |
+| 007 | Corpus de fixtures + tests | ✅ | tests SSRF, corpus `crates/crawler/tests/fixtures` (pages piégées) |
 | 008 | Persistance SQLite | 🟡 | reste : politique de rétention, `CrawlRun` / `Issue` dédiés |
 | 009 | CLI de crawl | ✅ | `--format text\|csv\|json`, `--db` / `--project`, `runs`, `export`, `diff` |
-| 010 | Règles SEO + regroupement des problèmes | 🟡 | gravité harmonisée (source unique, `--fail-on`) ; reste : seuils configurables en CLI, doc des faux positifs (étape 8) ; piste : exclure des doublons les pages dont la canonical pointe ailleurs |
+| 010 | Règles SEO + regroupement des problèmes | 🟡 | gravité harmonisée (source unique, `--fail-on`) ; seuils réglables en CLI ; reste : doc des faux positifs (étape 8) ; piste : exclure des doublons les pages dont la canonical pointe ailleurs |
 | 011 | Snapshots + comparaison (`audit-diff`) | ✅ | `callistseo diff` (code retour 1 si nouvelles erreurs, utilisable en CI) ; reste : étape 10 |
 | 012 | React, Vite, Tailwind, shadcn/ui | ✅ | `apps/web` |
 | 013 | Client API + pages projets | ✅ | client typé dans `src/lib/api.ts` (à extraire en package si besoin) |
@@ -116,7 +116,7 @@ Sécurité en place : http/https seulement ; IP privées, loopback, link-local e
 - Un seul jeton partagé pour l'API (pas de comptes) ; identifiants des sites audités non gérés (étape 7).
 - Banc à comptes exacts : le site synthétique n'a ni hreflang, ni sitemap, ni site tiers (règles testées en unitaire) ; quasi-doublons non vérifiés sur le corpus dense.
 - Textes des règles en double (`seo-rules/src/info.rs` et `apps/web/src/lib/rules.ts`), synchronisés à la main (étape 15).
-- Dépendances indirectes signalées par `cargo audit` (`fxhash`, `proc-macro-error`, `glib` 0.18) : elles viennent de Tauri et `scraper`.
+- Dépendances indirectes signalées comme non maintenues (`fxhash`, `proc-macro-error`, `glib` 0.18) : elles viennent de Tauri et `scraper` ; `cargo deny` (CI) ne fait échouer que les failles.
 
 ## Vision et décisions
 

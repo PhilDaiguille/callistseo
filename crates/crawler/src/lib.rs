@@ -526,6 +526,60 @@ fn is_generic_anchor(text: &str) -> bool {
     GENERIC.contains(&t.as_str())
 }
 
+/// Au-delà, le document est coupé avant l'analyse : le temps de l'analyseur HTML croît avec
+/// (balises × profondeur), soit 8 s pour 100 000 `<div>` imbriquées. Chrome s'arrête à 512 niveaux ;
+/// les vraies pages restent sous 100.
+const MAX_NESTING: usize = 1_000;
+
+/// Début de `html` jusqu'à la balise qui dépasserait `max` niveaux d'imbrication (tout le document
+/// sinon). Estimation rapide sur le texte : les éléments vides et ceux que l'analyseur ferme tout
+/// seuls (`<p>`, `<li>`…) ne comptent pas, pour ne pas couper du HTML ancien mais valide.
+// ponytail: pas de tokenizer complet (commentaires et scripts comptent comme du balisage) ; sans effet sous la limite.
+fn cap_nesting(html: &str, max: usize) -> &str {
+    const FLAT: &[&str] = &[
+        "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source",
+        "track", "wbr", "p", "li", "dt", "dd", "option", "tr", "td", "th", "thead", "tbody",
+        "tfoot", "colgroup",
+    ];
+    let bytes = html.as_bytes();
+    let mut depth = 0usize;
+    let mut i = 0;
+    while let Some(off) = bytes[i..].iter().position(|&b| b == b'<') {
+        let at = i + off;
+        i = at + 1;
+        let closing = bytes.get(i) == Some(&b'/');
+        let name_start = i + usize::from(closing);
+        // Doctype, commentaires, `<?…>`, `<` isolé : pas un élément.
+        if !bytes.get(name_start).is_some_and(u8::is_ascii_alphabetic) {
+            continue;
+        }
+        let name_len = bytes[name_start..]
+            .iter()
+            .take_while(|b| b.is_ascii_alphanumeric())
+            .count();
+        let name = html[name_start..name_start + name_len].to_ascii_lowercase();
+        if FLAT.contains(&name.as_str()) {
+            continue;
+        }
+        if closing {
+            depth = depth.saturating_sub(1);
+            continue;
+        }
+        let end = bytes[i..]
+            .iter()
+            .position(|&b| b == b'>')
+            .map_or(bytes.len(), |e| i + e);
+        if end > 0 && bytes[end - 1] == b'/' {
+            continue; // `<x/>`
+        }
+        depth += 1;
+        if depth > max {
+            return &html[..at];
+        }
+    }
+    html
+}
+
 fn parse_html(
     body: &[u8],
     base: &Url,
@@ -533,7 +587,7 @@ fn parse_html(
     facts: &mut PageFacts,
 ) -> (Vec<Url>, PageMeta) {
     let source = String::from_utf8_lossy(body);
-    let doc = scraper::Html::parse_document(&source);
+    let doc = scraper::Html::parse_document(cap_nesting(&source, MAX_NESTING));
     let sel = &*SELECTORS;
     // `<base href>` (premier élément) change la base de résolution des URL relatives.
     let doc_base = doc
@@ -678,6 +732,22 @@ fn parse_html(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deep_nesting_is_cut_but_ordinary_html_is_kept() {
+        use super::cap_nesting;
+        let deep = format!("<html>{}x{}", "<div>".repeat(5), "</div>".repeat(5));
+        assert_eq!(cap_nesting(&deep, 3), "<html><div><div>");
+        // Profondeur qui redescend, éléments vides, auto-fermés et `<p>` / `<li>` non fermés : intact.
+        let flat = format!(
+            "<!doctype html><!-- note --><ul>{}</ul>{}<img src=x><br/><x-a/>a < b",
+            "<li><p>texte".repeat(50),
+            "<div><span>x</span></div>".repeat(50)
+        );
+        assert_eq!(cap_nesting(&flat, 3), flat);
+        // Coupe sur une frontière de caractère, même avec du texte non ASCII.
+        assert_eq!(cap_nesting("<a>é<b>è<c>", 2), "<a>é<b>è");
+    }
+
     use super::*;
 
     #[test]

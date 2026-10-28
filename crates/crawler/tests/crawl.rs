@@ -893,3 +893,102 @@ async fn redirect_to_an_internal_address_is_recorded_not_followed() {
         Some("169.254.169.254")
     );
 }
+
+/// Corpus de pages piégées (`tests/fixtures`, plus des pages générées) : le crawl et l'analyse
+/// doivent aller au bout sans planter, et chaque page est enregistrée avec son statut.
+#[tokio::test]
+async fn hostile_pages_never_crash_the_crawl_or_the_rules() {
+    fn leak(s: String) -> &'static str {
+        Box::leak(s.into_boxed_str())
+    }
+    // Plus gros que `max_body_bytes` (5 Mo) : tronqué, jamais lu en entier.
+    let huge = leak(format!(
+        "<title>énorme</title>{}",
+        "<p>mot mot mot <a href=\"/huge.html\">x</a></p>".repeat(150_000)
+    ));
+    // Imbrication très profonde (pile de l'analyseur HTML).
+    let deep = leak(format!(
+        "{}<a href=\"/\">fond</a>{}",
+        "<div>".repeat(50_000),
+        "</div>".repeat(50_000)
+    ));
+    let routes: &'static [Route] = Box::leak(Box::new([
+        (
+            "/",
+            200,
+            "",
+            r#"<a href="/malformed.html">1</a><a href="/weird-meta.html">2</a><a href="/empty.html">3</a>
+               <a href="/not-html.html">4</a><a href="/huge.html">5</a><a href="/deep.html">6</a>
+               <a href="/self-redirect.html">7</a><a href="/bad-location.html">8</a><a href="/gzip-lie.html">9</a>"#,
+        ),
+        (
+            "/malformed.html",
+            200,
+            "",
+            include_str!("fixtures/malformed.html"),
+        ),
+        (
+            "/weird-meta.html",
+            200,
+            "",
+            include_str!("fixtures/weird-meta.html"),
+        ),
+        ("/empty.html", 200, "", include_str!("fixtures/empty.html")),
+        (
+            "/not-html.html",
+            200,
+            "",
+            include_str!("fixtures/not-html.html"),
+        ),
+        ("/huge.html", 200, "", huge),
+        ("/deep.html", 200, "", deep),
+        (
+            "/self-redirect.html",
+            301,
+            "Location: /self-redirect.html\r\n",
+            "",
+        ),
+        ("/bad-location.html", 302, "Location: ht!tp://[\r\n", ""),
+        // Annonce gzip, envoie du texte brut.
+        (
+            "/gzip-lie.html",
+            200,
+            "Content-Encoding: gzip\r\n",
+            "pas compressé",
+        ),
+    ]));
+    let start = serve(routes).await;
+    let pages = crawl(start, local_cfg()).await.unwrap();
+    let status = |p: &str| {
+        pages
+            .iter()
+            .find(|x| x.url.path() == p)
+            .unwrap_or_else(|| panic!("{p} manquant"))
+            .status
+    };
+    for p in [
+        "/malformed.html",
+        "/weird-meta.html",
+        "/empty.html",
+        "/not-html.html",
+        "/huge.html",
+        "/deep.html",
+    ] {
+        assert_eq!(status(p), Some(200), "{p}");
+    }
+    assert_eq!(status("/self-redirect.html"), Some(301));
+    assert_eq!(status("/bad-location.html"), Some(302));
+    let malformed = pages
+        .iter()
+        .find(|x| x.url.path() == "/malformed.html")
+        .unwrap();
+    // Les liens exploitables sont gardés, les autres ignorés sans erreur.
+    assert!(malformed.links.iter().any(|l| l.path() == "/espaces.html"));
+    assert!(malformed
+        .links
+        .iter()
+        .all(|l| l.scheme() == "http" || l.scheme() == "https"));
+    // Les règles passent sur tout le corpus.
+    let issues = callistseo_seo_rules::analyze(&pages, &Default::default());
+    assert!(!issues.is_empty());
+}

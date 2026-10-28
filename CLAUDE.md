@@ -16,6 +16,7 @@ pnpm --filter web exec vitest run src/lib/format.test.ts  # un fichier de test w
 make serve   &   make web-dev   # API 127.0.0.1:8080 + interface 5173 (proxy /api)
 make serve-ui                   # API + interface construite sur un seul port (comme Docker)
 make bench-quick                # échoue si une règle n'est pas exacte (comptes attendus connus)
+make deny                       # licences, failles, sources des dépendances (deny.toml, aussi en CI)
 ```
 
 - `cargo test` à la racine **n'inclut pas** l'app desktop (`default-members = crates/*`) : elle exige `apps/web/dist`. La compiler avec `cargo build -p callistseo-desktop` (ou `pnpm --filter desktop build`) après `make web-build`.
@@ -54,7 +55,7 @@ Points qui demandent de lire plusieurs fichiers :
 
 ## Tests
 
-Les tests d'intégration du crawler (`crawler/tests/crawl.rs`) démarrent un mini-serveur TCP en processus : tableau de `Route = (chemin, statut, en-têtes, corps)`, `{PORT}` est remplacé dans les corps, `serve_with` pour un serveur à état. Les tests API utilisent `tower::ServiceExt::oneshot` sur le routeur (sans réseau). Les tests de timing n'assertent que des bornes basses.
+Les tests d'intégration du crawler (`crawler/tests/crawl.rs`) démarrent un mini-serveur TCP en processus : tableau de `Route = (chemin, statut, en-têtes, corps)`, `{PORT}` est remplacé dans les corps, `serve_with` pour un serveur à état. Les tests API utilisent `tower::ServiceExt::oneshot` sur le routeur (sans réseau). Les tests de timing n'assertent que des bornes basses. Corpus de pages piégées : `crawler/tests/fixtures` (test `hostile_pages_never_crash_the_crawl_or_the_rules`) ; y ajouter tout HTML qui a posé problème. L'analyseur HTML est quadratique en profondeur : `cap_nesting` coupe au-delà de `MAX_NESTING`.
 
 ## À savoir
 

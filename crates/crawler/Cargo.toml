@@ -13,3 +13,6 @@ scraper.workspace = true
 flate2 = "1.1.10"
 httpdate = "1"
 regex = "1"
+
+[dev-dependencies]
+callistseo-seo-rules = { path = "../seo-rules" }
