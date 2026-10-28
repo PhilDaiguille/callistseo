@@ -39,7 +39,10 @@ describe('config form', () => {
     expect(list.map((e) => [e.name, e.kind, e.attr])).toEqual([['ga', 'regex', null], ['prix', 'css', null], ['lien', 'css', 'href'], ['url', 'regex', null]])
     expect(list[3]!.pattern).toBe('https?://x')
     expect(parseExtractors(formatExtractors(list))).toEqual(list)
-    expect(() => parseExtractors('a: xpath: //x')).toThrow(/regex, css ou contains/)
+    expect(() => parseExtractors('a: jsonpath: $.x')).toThrow(/regex, css, contains ou xpath/)
+    // XPath : les « :: » des axes restent dans le motif.
+    const [xp] = parseExtractors('parent: xpath: //span/ancestor::div[1]/@id')
+    expect([xp!.kind, xp!.pattern]).toEqual(['xpath', '//span/ancestor::div[1]/@id'])
     expect(parseExtractors('')).toEqual([])
   })
 })

@@ -688,6 +688,7 @@ impl ExtractorDef {
             "regex" => ExtractKind::Regex,
             "css" => ExtractKind::Css,
             "contains" => ExtractKind::Contains,
+            "xpath" => ExtractKind::Xpath,
             other => {
                 return Err(format!(
                     "extraction « {} » : type inconnu « {other} »",
@@ -801,6 +802,7 @@ async fn get_auth(State(s): State<AppState>, Path(id): Path<i64>) -> ApiResult<J
         "basic": body.as_ref().is_some_and(|b| b.basic.is_some()),
         "headers": body.as_ref().map_or(0, |b| b.headers.len()),
         "cookies": body.as_ref().is_some_and(|b| b.cookies.is_some()),
+        "form": body.as_ref().is_some_and(|b| b.form.is_some()),
     })))
 }
 
@@ -821,6 +823,22 @@ async fn put_auth(
     }
     callistseo_crawler::validate_auth(&auth)
         .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
+    let project = s
+        .db(move |st| st.project(id))
+        .await?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "projet introuvable"))?;
+    if let Some(form) = &auth.form {
+        let same_site = match (Url::parse(&form.url), Url::parse(&project.start_url)) {
+            (Ok(a), Ok(b)) => a.origin() == b.origin(),
+            _ => false,
+        };
+        if !same_site {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "la page de connexion doit être sur le site du projet (même adresse et protocole)",
+            ));
+        }
+    }
     let blob = secrets::encrypt(&key, id, &body).map_err(ApiError::internal)?;
     if !s.db(move |st| st.set_project_secret(id, &blob)).await? {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "projet introuvable"));
@@ -2460,11 +2478,12 @@ mod tests {
             let path = path.clone();
             async move { json_call(&app, Method::PUT, &path, Some(json!({"extractors": ex}))).await }
         };
-        let ok = json!([{"name": "ga", "kind": "regex", "pattern": "UA-(\\d+)"}, {"name": "prix", "kind": "css", "pattern": ".price"}, {"name": "todo", "kind": "contains", "pattern": "TODO"}]);
+        let ok = json!([{"name": "ga", "kind": "regex", "pattern": "UA-(\\d+)"}, {"name": "prix", "kind": "css", "pattern": ".price"}, {"name": "todo", "kind": "contains", "pattern": "TODO"}, {"name": "auteur", "kind": "xpath", "pattern": "//meta[@name='author']/@content"}]);
         assert_eq!(put(ok).await.0, StatusCode::OK);
         for bad in [
             json!([{"name": "a b", "kind": "regex", "pattern": "x"}]),
-            json!([{"name": "a", "kind": "xpath", "pattern": "x"}]),
+            json!([{"name": "a", "kind": "jsonpath", "pattern": "x"}]),
+            json!([{"name": "a", "kind": "xpath", "pattern": "//["}]),
             json!([{"name": "a", "kind": "regex", "pattern": "("}]),
             json!([{"name": "a", "kind": "css", "pattern": "div["}]),
         ] {
@@ -2473,7 +2492,7 @@ mod tests {
         let (_, kept) = json_call(&app, Method::GET, &path, None).await;
         assert_eq!(
             kept["extractors"].as_array().unwrap().len(),
-            3,
+            4,
             "la configuration valide est conservée"
         );
     }
@@ -2904,6 +2923,42 @@ mod tests {
         assert!(err["error"].as_str().unwrap().contains("illisibles"));
         let (_, state) = json_call(&other_app, Method::GET, &uri, None).await;
         assert_eq!(state["readable"], json!(false));
+
+        // Connexion par formulaire : page sur le site du projet seulement, mot de passe jamais renvoyé.
+        let form =
+            |url: &str| json!({"form": {"url": url, "username": "moi", "password": "form-mdp"}});
+        let (st, _) = json_call(
+            &app,
+            Method::PUT,
+            &uri,
+            Some(form("https://ailleurs.fr/connexion")),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        let (st, _) = json_call(
+            &app,
+            Method::PUT,
+            &uri,
+            Some(form("http://exemple.fr/connexion")),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "HTTP pour un site HTTPS");
+        let (st, _) = json_call(
+            &app,
+            Method::PUT,
+            &uri,
+            Some(form("https://exemple.fr/connexion")),
+        )
+        .await;
+        assert_eq!(st, StatusCode::NO_CONTENT);
+        let (_, bytes) = call(&app, Method::GET, &uri, None, None).await;
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(
+            text.contains("\"form\":true") && !text.contains("form-mdp"),
+            "{text}"
+        );
+        let auth = project_auth(&st8, id).await.ok().unwrap();
+        assert_eq!(auth.form.unwrap().password, "form-mdp");
 
         // Retrait possible même sans la bonne clé.
         let (st, _) = json_call(&other_app, Method::DELETE, &uri, None).await;

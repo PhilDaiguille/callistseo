@@ -958,7 +958,19 @@ async fn hostile_pages_never_crash_the_crawl_or_the_rules() {
         ),
     ]));
     let start = serve(routes).await;
-    let pages = crawl(start, local_cfg()).await.unwrap();
+    // Un extracteur XPath fait passer chaque page par le second analyseur HTML (skyscraper).
+    let cfg = CrawlConfig {
+        extractors: vec![callistseo_core::Extractor {
+            name: "liens".into(),
+            kind: callistseo_core::ExtractKind::Xpath,
+            pattern: "//a/@href".into(),
+            attr: None,
+        }],
+        ..local_cfg()
+    };
+    let started = std::time::Instant::now();
+    let pages = crawl(start, cfg).await.unwrap();
+    eprintln!("corpus : {:?}", started.elapsed());
     let status = |p: &str| {
         pages
             .iter()
@@ -1053,6 +1065,7 @@ async fn site_credentials_go_to_the_audited_origin_only() {
             basic: Some(("robot".into(), "s3cret".into())),
             headers: vec![("X-Preprod-Key".into(), "cle-123".into())],
             cookies: Some("session=abc".into()),
+            form: None,
         },
         ..local_cfg()
     };
@@ -1123,4 +1136,114 @@ async fn invalid_site_credentials_fail_before_any_request() {
         ..SiteAuth::default()
     };
     assert!(!format!("{auth:?}").contains("motdepasse"));
+}
+
+/// Site à connexion par formulaire : `/connexion` (CSRF + cookie de pré-session), `POST /session`
+/// (vérifie CSRF et identifiants, pose `sid`), pages réservées avec `sid`, `/logout` invalide la
+/// session. Renvoie l'URL de départ et les chemins servis avec une session valide.
+async fn login_site() -> (Url, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let served = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = served.clone();
+    let logged_out = std::sync::Arc::new(AtomicBool::new(false));
+    tokio::spawn(async move {
+        loop {
+            let (mut s, _) = listener.accept().await.unwrap();
+            let (log, logged_out) = (log.clone(), logged_out.clone());
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 16384];
+                let n = s.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let mut words = req.split_whitespace();
+                let (method, path) = (words.next().unwrap_or(""), words.next().unwrap_or("/"));
+                let has_session = req.contains("sid=ok") && !logged_out.load(Ordering::SeqCst);
+                let (status, extra, body): (u16, String, String) = match (method, path) {
+                    ("GET", "/connexion") => (
+                        200,
+                        "Set-Cookie: pre=1; Path=/\r\n".into(),
+                        r#"<form method="post" action="/session"><input type="hidden" name="csrf" value="t0k">
+                           <input name="login"><input type="password" name="mdp"></form>"#.into(),
+                    ),
+                    ("POST", "/session") => {
+                        let body = req.split("\r\n\r\n").nth(1).unwrap_or("");
+                        if req.contains("pre=1") && body.contains("csrf=t0k") && body.contains("login=moi%40a.test") && body.contains("mdp=s3cret") {
+                            (302, "Location: /\r\nSet-Cookie: sid=ok; HttpOnly\r\n".into(), String::new())
+                        } else {
+                            (200, String::new(), r#"<form method="post" action="/session"><input name="login"><input type="password" name="mdp"></form>"#.into())
+                        }
+                    }
+                    ("GET", "/logout") => {
+                        logged_out.store(true, Ordering::SeqCst);
+                        (302, "Location: /connexion\r\n".into(), String::new())
+                    }
+                    ("GET", p) if has_session => {
+                        log.lock().unwrap().push(p.to_owned());
+                        (200, String::new(), r#"<a href="/compte">compte</a><a href="/logout">Déconnexion</a><a href="/compte/deconnexion">x</a>"#.into())
+                    }
+                    _ => (302, "Location: /connexion\r\n".into(), String::new()),
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status} X\r\nContent-Type: text/html\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = s.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+    (
+        Url::parse(&format!("http://127.0.0.1:{port}/")).unwrap(),
+        served,
+    )
+}
+
+fn form_cfg(start: &Url, password: &str) -> CrawlConfig {
+    CrawlConfig {
+        auth: callistseo_core::SiteAuth {
+            form: Some(callistseo_core::FormLogin {
+                url: start.join("/connexion").unwrap().to_string(),
+                username: "moi@a.test".into(),
+                password: password.into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        ..local_cfg()
+    }
+}
+
+#[tokio::test]
+async fn form_login_opens_a_session_and_never_follows_logout_links() {
+    let (start, served) = login_site().await;
+    let pages = crawl(start.clone(), form_cfg(&start, "s3cret"))
+        .await
+        .unwrap();
+    let ok: Vec<_> = pages
+        .iter()
+        .filter(|p| p.status == Some(200))
+        .map(|p| p.url.path().to_owned())
+        .collect();
+    assert!(
+        ok.contains(&"/".to_owned()) && ok.contains(&"/compte".to_owned()),
+        "{ok:?}"
+    );
+    assert!(pages
+        .iter()
+        .all(|p| !p.url.path().contains("logout") && !p.url.path().contains("deconnexion")));
+    assert!(served.lock().unwrap().len() >= 2);
+
+    // Mauvais mot de passe : l'audit échoue avec un message clair, sans crawler la page de connexion.
+    let (start, _) = login_site().await;
+    let err = crawl(start.clone(), form_cfg(&start, "faux"))
+        .await
+        .unwrap_err();
+    assert!(err.contains("réaffiché"), "{err}");
+
+    // Page de connexion sur un autre site : refusée.
+    let (start, _) = login_site().await;
+    let mut cfg = form_cfg(&start, "s3cret");
+    cfg.auth.form.as_mut().unwrap().url = "http://localhost:1/connexion".into();
+    let err = crawl(start, cfg).await.unwrap_err();
+    assert!(err.contains("site audité"), "{err}");
 }

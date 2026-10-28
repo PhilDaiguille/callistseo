@@ -1,7 +1,7 @@
 # CallistSEO — Roadmap
 
 Document de suivi, mis à jour à chaque jalon. Légende : ✅ fait · 🟡 partiel · ⬜ à faire · ⏸ reporté.
-Dernière mise à jour : 27 oct. 2026.
+Dernière mise à jour : 28 oct. 2026.
 
 ## En un coup d'œil
 
@@ -36,7 +36,7 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 ### Priorité 2 — valeur produit
 
 6. 🟡 **Résultats pendant l'audit** : ~~tableau en direct~~ fait (pages enregistrées par lots pendant l'audit, remplacées par le résultat complet à la fin ; problèmes, liens entrants et maillage restent calculés à la fin). Reste : mémoire bornée sur très gros sites (l'analyse a besoin de toutes les pages : la faire lire depuis la base).
-7. 🟡 **Authentification des sites audités** : fait : Basic, en-têtes, cookies, envoyés à la seule origine du projet ; chiffrés (AES-256-GCM, `CALLISTSEO_SECRET_KEY`, fonction désactivée sans clé ; desktop : clé locale `secret.key`), jamais renvoyés ni journalisés ; CLI `--basic-auth` / `--header` / `--cookie`. Reste : connexion par formulaire (identifiant + mot de passe postés, cookie récupéré ; le cookie copié du navigateur la remplace en attendant), clé desktop dans le trousseau du système.
+7. ~~Authentification des sites audités~~ faite : Basic, en-têtes, cookies et **connexion par formulaire** (page chargée, jeton CSRF et champs cachés repris, cookies de session gardés, liens de déconnexion jamais suivis), tout envoyé à la seule origine du projet ; chiffrés (AES-256-GCM, `CALLISTSEO_SECRET_KEY`, fonction désactivée sans clé ; desktop : clé locale `secret.key`), jamais renvoyés ni journalisés. Reste en option : clé desktop dans le trousseau du système, connexions en JavaScript (phase 7).
 8. 🟡 **Qualité des règles** : faits : tests SSRF par redirection, corpus `crates/crawler/tests/fixtures` (HTML invalide, métadonnées absurdes, document vide, JSON servi en HTML, page de 7 Mo, 50 000 niveaux d'imbrication, redirection vers soi, `Location` invalide, faux gzip), `cargo deny` dans la CI (licences, failles, sources ; a corrigé RUSTSEC-2026-0384 dans tokio), banc à comptes exacts dans la CI, seuils réglables en CLI (`--title-max`, `--min-words`…). Le corpus a révélé un temps quadratique de l'analyseur HTML sur l'imbrication profonde (8 s pour 100 000 niveaux) : document coupé au-delà de 1 000 niveaux. Reste : audit sur 10+ vrais sites (faux positifs) et leur documentation, détection de régressions de performance (le banc ne vérifie que l'exactitude).
 9. ~~Robustesse robots~~ fait : `robots.txt` en 5xx = tout interdit (comme Google ; `--ignore-robots` le contourne), `Retry-After` en date HTTP, `<base href>` pris en compte. `rel=nofollow` reste volontairement exploré (le lien reste dans le graphe) ; compté dans `nofollow_links`.
 10. **Suivi des régressions** : comparaison avec l'audit précédent poussée à l'utilisateur (webhook / e-mail), calendrier jour et heure au lieu d'un simple intervalle, tendances sur plusieurs audits, diff en JSON/CSV.
@@ -45,7 +45,7 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 
 11. **Intégrations** (désactivées par défaut, vos clés) : écran de consentement (ce qui part chez qui), clés chiffrées, quotas et plafonds de coût. **PageSpeed Insights** (Core Web Vitals), puis **Search Console et GA4** (compte de service), puis **OpenAI / Gemini** sur échantillon avec plafond.
 12. **Visualisations** : arborescence des dossiers, graphe de liens plafonné (~3 000 nœuds).
-13. **Règles à faible coût** : `data-nosnippet`, `llms.txt` (informatif), cohérence schéma / texte visible, XPath pour l'extraction personnalisée.
+13. **Règles à faible coût** : `data-nosnippet`, `llms.txt` (informatif), cohérence schéma / texte visible. ~~XPath pour l'extraction personnalisée~~ fait (`xpath`, via `skyscraper`).
 14. **MCP** : transport HTTP et ressources MCP.
 15. **Interface** : audit d'accessibilité (clavier, lecteur d'écran), tests de composants, synchronisation automatique `info.rs` ↔ `rules.ts` (test ou génération).
 16. **Rapports** : HTML personnalisable (logo, agence), export PDF.
@@ -63,7 +63,7 @@ Rendu JavaScript (Chrome piloté + proxy appliquant le filtre anti-SSRF), JavaSc
 | 2 | Données par URL (schéma v3) : temps de réponse, taille, empreinte du texte, mots, langue, en-têtes, hreflang, images, JSON-LD, H2, viewport | ✅ |
 | 3 | 59 règles SEO + sitemap XML : quasi-doublons (simhash), liens externes (`--check-external`), AMP, microdata, JSON-LD par type, `lastmod`, ancres, benchmark à comptes exacts | ✅ |
 | 4 | Poste de travail : 22 rapports, tableau virtualisé, inspecteur, ⌘K, pause / reprise / arrêt | ✅ |
-| 5 | Configuration : périmètre par projet, robots.txt d'essai, planification, segments, extraction personnalisée, sites protégés (Basic, en-têtes, cookies) | 🟡 reste : connexion par formulaire, XPath |
+| 5 | Configuration : périmètre par projet, robots.txt d'essai, planification, segments, extraction personnalisée (regex, CSS, XPath, recherche), sites protégés (Basic, en-têtes, cookies, formulaire) | ✅ |
 | 6 | Intégrations externes | ⬜ |
 | 7 | Rendu JavaScript et le reste | ⏸ |
 

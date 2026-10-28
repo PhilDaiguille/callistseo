@@ -2,6 +2,7 @@ mod adaptive;
 mod client;
 mod external;
 mod extract;
+mod login;
 mod robots;
 mod scope;
 mod sitemap;
@@ -72,7 +73,10 @@ pub async fn crawl_live(
     stats: Arc<CrawlStats>,
     live: Option<tokio::sync::mpsc::UnboundedSender<CrawledPage>>,
 ) -> Result<Vec<CrawledPage>, String> {
-    let client = Arc::new(Client::for_site(&cfg, &start)?);
+    let mut client = Client::for_site(&cfg, &start)?;
+    client.log_in().await?;
+    let avoid_logout = client.logged_in();
+    let client = Arc::new(client);
     let scope = Scope::new(&cfg.scope)?;
     let extractors = Arc::new(Extractors::new(&cfg.extractors)?);
     let host = start.host_str().map(str::to_owned);
@@ -243,6 +247,7 @@ pub async fn crawl_live(
                 && link.host_str() == host.as_deref()
                 && !is_infrastructure(link)
                 && scope.allows(link)
+                && !(avoid_logout && login::is_logout(link))
                 && seen.len() < cfg.max_pages
                 && seen.insert(link.clone())
             {
@@ -529,13 +534,13 @@ fn is_generic_anchor(text: &str) -> bool {
 /// Au-delà, le document est coupé avant l'analyse : le temps de l'analyseur HTML croît avec
 /// (balises × profondeur), soit 8 s pour 100 000 `<div>` imbriquées. Chrome s'arrête à 512 niveaux ;
 /// les vraies pages restent sous 100.
-const MAX_NESTING: usize = 1_000;
+pub(crate) const MAX_NESTING: usize = 1_000;
 
 /// Début de `html` jusqu'à la balise qui dépasserait `max` niveaux d'imbrication (tout le document
 /// sinon). Estimation rapide sur le texte : les éléments vides et ceux que l'analyseur ferme tout
 /// seuls (`<p>`, `<li>`…) ne comptent pas, pour ne pas couper du HTML ancien mais valide.
 // ponytail: pas de tokenizer complet (commentaires et scripts comptent comme du balisage) ; sans effet sous la limite.
-fn cap_nesting(html: &str, max: usize) -> &str {
+pub(crate) fn cap_nesting(html: &str, max: usize) -> &str {
     const FLAT: &[&str] = &[
         "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source",
         "track", "wbr", "p", "li", "dt", "dd", "option", "tr", "td", "th", "thead", "tbody",

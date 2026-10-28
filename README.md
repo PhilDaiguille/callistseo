@@ -79,12 +79,12 @@ Pas de comptes nominatifs (on ne sait pas qui a fait quoi, on ne retire pas l'ac
 
 ### Sites protégés
 
-Préproduction derrière un mot de passe, espace réservé : un projet peut porter des identifiants (onglet Configuration → « Site protégé »), **authentification HTTP Basic**, **en-têtes** (clé d'accès, `Authorization: Bearer …`) et **cookies** (pour une connexion par formulaire, copier le cookie de session depuis le navigateur).
+Préproduction derrière un mot de passe, espace réservé : un projet peut porter des identifiants (onglet Configuration → « Site protégé »), **authentification HTTP Basic**, **en-têtes** (clé d'accès, `Authorization: Bearer …`), **cookies** et **connexion par formulaire** : avant l'audit, la page de connexion est chargée, son formulaire rempli (jeton CSRF et champs cachés repris, champs identifiant et mot de passe détectés ou nommés) et envoyé ; les cookies de session servent pour tout l'audit, et les liens de déconnexion (`logout`, `deconnexion`…) ne sont jamais suivis. Identifiants refusés (formulaire réaffiché) : l'audit échoue avec un message clair.
 
 - Envoyés **uniquement** à l'origine du projet (même protocole, hôte et port) : jamais aux liens externes vérifiés, jamais à la version HTTP d'un site HTTPS. Les filtres anti-SSRF restent les mêmes.
 - Chiffrés en base (AES-256-GCM, liés au projet) avec `CALLISTSEO_SECRET_KEY` (`openssl rand -hex 32`) ; sans clé, la fonction est désactivée. L'API ne renvoie que leur nature (Basic, nombre d'en-têtes, cookies), jamais leurs valeurs ; rien n'est journalisé ni enregistré avec l'audit.
 - Clé changée ou perdue : les identifiants deviennent illisibles, les audits du projet sont refusés (plutôt que de crawler la page de connexion) jusqu'à ce qu'on les ressaisisse ou les retire.
-- Desktop : clé créée au premier lancement (`secret.key`, dans le dossier de l'application). CLI : `--basic-auth utilisateur:motdepasse` (ou `CALLISTSEO_BASIC_AUTH`, absent de la liste des processus), `--header "Nom: valeur"`, `--cookie "nom=valeur"`.
+- Desktop : clé créée au premier lancement (`secret.key`, dans le dossier de l'application). CLI : `--basic-auth utilisateur:motdepasse` (ou `CALLISTSEO_BASIC_AUTH`, absent de la liste des processus), `--header "Nom: valeur"`, `--cookie "nom=valeur"`, `--login-url … --login-user …` (mot de passe : `--login-password` ou `CALLISTSEO_LOGIN_PASSWORD`).
 - En-têtes refusés : `User-Agent` (fixé par l'opérateur), `Host`, `Cookie` (champ dédié) et ceux du protocole.
 
 ## Site vitrine

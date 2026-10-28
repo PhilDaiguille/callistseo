@@ -61,6 +61,20 @@ pub struct AuthBody {
     pub basic: Option<BasicBody>,
     pub headers: Vec<HeaderBody>,
     pub cookies: Option<String>,
+    pub form: Option<FormBody>,
+}
+
+/// Connexion par formulaire. Les noms de champs sont facultatifs (détection automatique).
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FormBody {
+    pub url: String,
+    pub username: String,
+    pub password: String,
+    #[serde(default)]
+    pub username_field: Option<String>,
+    #[serde(default)]
+    pub password_field: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -90,6 +104,13 @@ impl AuthBody {
                 .map(|h| (h.name.clone(), h.value.clone()))
                 .collect(),
             cookies: self.cookies.clone().filter(|c| !c.is_empty()),
+            form: self.form.as_ref().map(|f| callistseo_core::FormLogin {
+                url: f.url.trim().to_owned(),
+                username: f.username.clone(),
+                password: f.password.clone(),
+                username_field: f.username_field.clone().filter(|n| !n.is_empty()),
+                password_field: f.password_field.clone().filter(|n| !n.is_empty()),
+            }),
         }
     }
 }

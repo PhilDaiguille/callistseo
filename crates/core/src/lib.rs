@@ -94,6 +94,9 @@ pub enum ExtractKind {
     Css,
     /// Recherche dans le code source : une seule valeur « N » (nombre d'occurrences) si le texte est trouvé.
     Contains,
+    /// Expression XPath : le texte de chaque élément, la valeur d'un attribut (`//a/@href`) ou le
+    /// résultat d'une fonction (`count(//img)`).
+    Xpath,
 }
 
 /// Extraction personnalisée appliquée à chaque page HTML.
@@ -122,6 +125,19 @@ pub struct SiteAuth {
     pub headers: Vec<(String, String)>,
     /// En-tête `Cookie` (session ouverte dans un navigateur, par exemple).
     pub cookies: Option<String>,
+    /// Connexion par formulaire avant l'audit : les cookies de session obtenus s'ajoutent à `cookies`.
+    pub form: Option<FormLogin>,
+}
+
+/// Formulaire de connexion : page qui le contient (même origine que le site), identifiants, et
+/// noms des champs si la détection automatique (champ mot de passe + champ texte précédent) échoue.
+#[derive(Clone, Default, PartialEq)]
+pub struct FormLogin {
+    pub url: String,
+    pub username: String,
+    pub password: String,
+    pub username_field: Option<String>,
+    pub password_field: Option<String>,
 }
 
 impl std::fmt::Debug for SiteAuth {
@@ -132,7 +148,10 @@ impl std::fmt::Debug for SiteAuth {
 
 impl SiteAuth {
     pub fn is_empty(&self) -> bool {
-        self.basic.is_none() && self.headers.is_empty() && self.cookies.is_none()
+        self.basic.is_none()
+            && self.headers.is_empty()
+            && self.cookies.is_none()
+            && self.form.is_none()
     }
 }
 

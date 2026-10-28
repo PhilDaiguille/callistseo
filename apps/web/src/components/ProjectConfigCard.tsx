@@ -59,12 +59,13 @@ function Form({ projectId, saved }: { projectId: number; saved: ProjectConfig })
           className={AREA}
           value={form.extractors}
           onChange={set('extractors')}
-          placeholder={'ga: regex: UA-(\\d+)\nprix: css: .price\nlien: css@href: a.cta\nbrouillon: contains: TODO'}
+          placeholder={'ga: regex: UA-(\\d+)\nprix: css: .price\nlien: css@href: a.cta\nbrouillon: contains: TODO\nauteur: xpath: //meta[@name="author"]/@content'}
           spellCheck={false}
         />
         <p className="text-xs text-muted-foreground">
           Une ligne par extracteur : <code>nom: type: motif</code>. <code>regex</code> = premier groupe capturant du HTML source ; <code>css</code> = texte des éléments
-          (<code>css@href</code> = valeur de l’attribut) ; <code>contains</code> = nombre d’occurrences du texte. 10 au plus ; résultats dans la colonne « Extraction ».
+          (<code>css@href</code> = valeur de l’attribut) ; <code>contains</code> = nombre d’occurrences du texte ; <code>xpath</code> = texte des nœuds, valeur des attributs (<code>//a/@href</code>) ou résultat d’une
+          fonction (<code>count(//img)</code>). 10 au plus ; résultats dans la colonne « Extraction ».
         </p>
       </div>
       <div className="flex flex-wrap items-end gap-4">

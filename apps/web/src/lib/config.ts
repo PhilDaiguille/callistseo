@@ -20,8 +20,8 @@ export function parseExtractors(text: string): ExtractorDef[] {
   return toLines(text).map((line) => {
     const [name = '', kindRaw = '', ...rest] = line.split(':')
     const [kind = '', attr] = kindRaw.trim().split('@')
-    if (!['regex', 'css', 'contains'].includes(kind)) {
-      throw new Error(`Extraction « ${line.slice(0, 40)} » : le type doit être regex, css ou contains (format : nom: type: motif)`)
+    if (!['regex', 'css', 'contains', 'xpath'].includes(kind)) {
+      throw new Error(`Extraction « ${line.slice(0, 40)} » : le type doit être regex, css, contains ou xpath (format : nom: type: motif)`)
     }
     return { name: name.trim(), kind: kind as ExtractorDef['kind'], pattern: rest.join(':').trim(), attr: attr ? attr.trim() : null }
   })
