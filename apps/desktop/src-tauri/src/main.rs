@@ -1,7 +1,7 @@
 // Pas de console sur Windows en release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use callistseo_api::{ApiConfig, InProcessResponse, LocalApi};
+use callistseo_api::{ApiConfig, InProcessResponse, LocalApi, SecretKey};
 use callistseo_storage::Store;
 use std::path::Path;
 use tauri::Manager;
@@ -64,6 +64,30 @@ fn open_url(url: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Clé des identifiants des sites audités : `CALLISTSEO_SECRET_KEY` si défini, sinon un fichier
+/// `secret.key` créé au premier lancement dans le dossier de l'application (lisible par
+/// l'utilisateur seul). Elle protège les identifiants si la base seule est copiée ou partagée.
+// ponytail: fichier à côté de la base ; trousseau du système (Keychain, Credential Manager) si besoin.
+fn secret_key(dir: &std::path::Path) -> Result<SecretKey, String> {
+    if let Ok(k) = std::env::var("CALLISTSEO_SECRET_KEY") {
+        return SecretKey::from_hex(&k);
+    }
+    let path = dir.join("secret.key");
+    if !path.exists() {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+        use std::io::Write;
+        opts.open(&path)
+            .and_then(|mut f| f.write_all(SecretKey::generate_hex().as_bytes()))
+            .map_err(|e| format!("clé {} : {e}", path.display()))?;
+    }
+    let hex =
+        std::fs::read_to_string(&path).map_err(|e| format!("clé {} : {e}", path.display()))?;
+    SecretKey::from_hex(&hex)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -73,7 +97,11 @@ fn main() {
             let mut store = Store::open(&dir.join("audits.db"))?;
             // Un audit resté « en cours » à la fermeture précédente est marqué interrompu.
             store.fail_stale_runs()?;
-            let api = LocalApi::new(store, ApiConfig::default());
+            let cfg = ApiConfig {
+                secret_key: Some(secret_key(&dir)?),
+                ..ApiConfig::default()
+            };
+            let api = LocalApi::new(store, cfg);
             // Audits récurrents : ils ne tournent que pendant que l'application est ouverte.
             tauri::async_runtime::spawn(api.scheduler().run());
             app.manage(api);

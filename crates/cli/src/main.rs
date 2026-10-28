@@ -75,6 +75,16 @@ enum Command {
         /// Fichier robots.txt à utiliser à la place de celui du site
         #[arg(long)]
         robots_file: Option<PathBuf>,
+        /// Site protégé : authentification HTTP Basic `utilisateur:motdepasse` (sinon la variable
+        /// CALLISTSEO_BASIC_AUTH, qui n'apparaît pas dans la liste des processus)
+        #[arg(long, help_heading = "Site protégé")]
+        basic_auth: Option<String>,
+        /// Site protégé : en-tête `Nom: valeur` ajouté à chaque requête vers le site (répétable)
+        #[arg(long = "header", help_heading = "Site protégé")]
+        headers: Vec<String>,
+        /// Site protégé : en-tête Cookie (`nom=valeur; nom2=valeur2`)
+        #[arg(long, help_heading = "Site protégé")]
+        cookie: Option<String>,
         /// Gravité à partir de laquelle la commande échoue (code retour 1) : utile en CI
         #[arg(long, value_enum, default_value_t = FailOn::Error)]
         fail_on: FailOn,
@@ -395,6 +405,44 @@ impl Thresholds {
     }
 }
 
+/// Identifiants du site audité, depuis les options (ou CALLISTSEO_BASIC_AUTH).
+fn site_auth(
+    basic: Option<String>,
+    headers: &[String],
+    cookie: Option<String>,
+) -> Result<callistseo_core::SiteAuth, String> {
+    let basic = basic.or_else(|| std::env::var("CALLISTSEO_BASIC_AUTH").ok());
+    let basic = basic
+        .map(|b| {
+            b.split_once(':')
+                .map(|(u, p)| (u.to_owned(), p.to_owned()))
+                .ok_or("--basic-auth : utilisateur:motdepasse")
+        })
+        .transpose()?;
+    let headers = headers
+        .iter()
+        .map(|h| {
+            h.split_once(':')
+                .map(|(n, v)| (n.trim().to_owned(), v.trim().to_owned()))
+                .ok_or_else(|| format!("--header « {h} » : Nom: valeur"))
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(callistseo_core::SiteAuth {
+        basic,
+        headers,
+        cookies: cookie,
+    })
+}
+
+/// Clé de chiffrement des identifiants (`CALLISTSEO_SECRET_KEY`) ; absente = fonction désactivée.
+fn secret_key() -> Result<Option<callistseo_api::SecretKey>, String> {
+    std::env::var("CALLISTSEO_SECRET_KEY")
+        .ok()
+        .filter(|k| !k.trim().is_empty())
+        .map(|k| callistseo_api::SecretKey::from_hex(&k))
+        .transpose()
+}
+
 async fn run(cmd: Command) -> Result<ExitCode, String> {
     match cmd {
         Command::Crawl {
@@ -405,6 +453,9 @@ async fn run(cmd: Command) -> Result<ExitCode, String> {
             max_concurrency,
             delay_ms,
             check_external,
+            basic_auth,
+            headers,
+            cookie,
             allow_private,
             ignore_robots,
             user_agent,
@@ -453,6 +504,7 @@ async fn run(cmd: Command) -> Result<ExitCode, String> {
                     .map(|e| parse_extractor(e))
                     .collect::<Result<_, _>>()?,
                 check_external,
+                auth: site_auth(basic_auth, &headers, cookie)?,
                 ..CrawlConfig::default()
             };
             let mut pages = callistseo_crawler::crawl(start.clone(), cfg.clone()).await?;
@@ -511,6 +563,7 @@ async fn run(cmd: Command) -> Result<ExitCode, String> {
                 static_dir,
                 trust_proxy: trust_proxy
                     || std::env::var("CALLISTSEO_TRUST_PROXY").is_ok_and(|v| v == "1"),
+                secret_key: secret_key()?,
                 user_agent: resolve_user_agent(user_agent),
                 ..Default::default()
             };
@@ -522,6 +575,7 @@ async fn run(cmd: Command) -> Result<ExitCode, String> {
             store.fail_stale_runs()?;
             let cfg = callistseo_api::ApiConfig {
                 user_agent: resolve_user_agent(user_agent),
+                secret_key: secret_key()?,
                 ..Default::default()
             };
             eprintln!("serveur MCP CallistSEO prêt (stdio), base {}", db.display());

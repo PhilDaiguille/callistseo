@@ -161,6 +161,13 @@ ALTER TABLE pages ADD COLUMN external_broken TEXT;
     "
 ALTER TABLE pages ADD COLUMN ai_bots_blocked TEXT;
 ",
+    // v14 : identifiants des sites audités, chiffrés par l'API (blob opaque pour le stockage).
+    "
+CREATE TABLE project_secrets (
+    project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    data BLOB NOT NULL
+);
+",
 ];
 
 /// Nœud du graphe de liens : (URL, profondeur, statut HTTP).
@@ -351,6 +358,42 @@ impl Store {
                 "UPDATE projects SET config = ?2 WHERE id = ?1",
                 params![id, config],
             )
+            .map_err(db)?;
+        Ok(n > 0)
+    }
+
+    /// Identifiants chiffrés du projet (blob opaque, chiffré et lu par l'API).
+    pub fn project_secret(&self, id: i64) -> Result<Option<Vec<u8>>> {
+        self.conn
+            .query_row(
+                "SELECT data FROM project_secrets WHERE project_id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(db)
+    }
+
+    /// Remplace les identifiants ; `false` si le projet n'existe pas.
+    pub fn set_project_secret(&mut self, id: i64, data: &[u8]) -> Result<bool> {
+        if self.project(id)?.is_none() {
+            return Ok(false);
+        }
+        self.conn
+            .execute(
+                "INSERT INTO project_secrets (project_id, data) VALUES (?1, ?2)
+                 ON CONFLICT (project_id) DO UPDATE SET data = excluded.data",
+                params![id, data],
+            )
+            .map_err(db)?;
+        Ok(true)
+    }
+
+    /// `false` s'il n'y avait aucun identifiant.
+    pub fn delete_project_secret(&mut self, id: i64) -> Result<bool> {
+        let n = self
+            .conn
+            .execute("DELETE FROM project_secrets WHERE project_id = ?1", [id])
             .map_err(db)?;
         Ok(n > 0)
     }
@@ -1786,6 +1829,30 @@ mod tests {
         drop(Store::open(&path).unwrap());
         assert!(!bak.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn project_secrets_are_replaced_and_leave_with_the_project() {
+        let mut store = Store::open_in_memory().unwrap();
+        let p = store.create_project("a", &u("/")).unwrap();
+        assert_eq!(store.project_secret(p).unwrap(), None);
+        assert!(!store.set_project_secret(999, b"x").unwrap());
+        assert!(store.set_project_secret(p, b"un").unwrap());
+        assert!(store.set_project_secret(p, b"deux").unwrap());
+        assert_eq!(
+            store.project_secret(p).unwrap().as_deref(),
+            Some(&b"deux"[..])
+        );
+        assert!(
+            store.delete_project_secret(p).unwrap() && !store.delete_project_secret(p).unwrap()
+        );
+        store.set_project_secret(p, b"trois").unwrap();
+        assert!(store.delete_project(p).unwrap());
+        let left: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM project_secrets", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left, 0);
     }
 
     #[test]

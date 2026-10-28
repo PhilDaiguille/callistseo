@@ -112,6 +112,30 @@ pub const MAX_EXTRACTORS: usize = 10;
 pub const MAX_EXTRACTED_VALUES: usize = 20;
 pub const MAX_EXTRACTED_LEN: usize = 300;
 
+/// Accès à un site protégé : envoyé seulement à l'origine exacte de l'URL de départ (même schéma,
+/// hôte et port), jamais aux autres sites. Le `Debug` masque tout : rien ne part dans les journaux.
+#[derive(Clone, Default, PartialEq)]
+pub struct SiteAuth {
+    /// Authentification HTTP Basic (utilisateur, mot de passe).
+    pub basic: Option<(String, String)>,
+    /// En-têtes ajoutés à chaque requête (jeton, clé d'accès à une préproduction…).
+    pub headers: Vec<(String, String)>,
+    /// En-tête `Cookie` (session ouverte dans un navigateur, par exemple).
+    pub cookies: Option<String>,
+}
+
+impl std::fmt::Debug for SiteAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SiteAuth(***)")
+    }
+}
+
+impl SiteAuth {
+    pub fn is_empty(&self) -> bool {
+        self.basic.is_none() && self.headers.is_empty() && self.cookies.is_none()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CrawlConfig {
     pub max_pages: usize,
@@ -133,6 +157,8 @@ pub struct CrawlConfig {
     pub extractors: Vec<Extractor>,
     /// Vérifie aussi les liens vers d'autres hôtes (requêtes vers des sites tiers : option).
     pub check_external: bool,
+    /// Identifiants du site audité (jamais enregistrés avec l'audit).
+    pub auth: SiteAuth,
 }
 
 impl Default for CrawlConfig {
@@ -151,6 +177,7 @@ impl Default for CrawlConfig {
             scope: UrlScope::default(),
             extractors: Vec::new(),
             check_external: false,
+            auth: SiteAuth::default(),
         }
     }
 }

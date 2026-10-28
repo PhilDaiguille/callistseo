@@ -4,6 +4,9 @@
 //! serveur sur chaque audit, et le filtre SSRF du crawler reste actif (`allow_private` n'est
 //! jamais exposé).
 
+mod secrets;
+pub use secrets::SecretKey;
+
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, Request, StatusCode};
@@ -48,6 +51,8 @@ pub struct ApiConfig {
     /// Derrière un proxy (HTTPS) : l'adresse du client est la dernière de `X-Forwarded-For`
     /// (celle qu'ajoute le proxy). Sans proxy devant, ne pas l'activer : l'en-tête serait falsifiable.
     pub trust_proxy: bool,
+    /// Clé de chiffrement des identifiants des sites audités ; sans elle, la fonction est désactivée.
+    pub secret_key: Option<SecretKey>,
 }
 
 impl Default for ApiConfig {
@@ -62,6 +67,7 @@ impl Default for ApiConfig {
             min_delay_ms: 0,
             static_dir: None,
             trust_proxy: false,
+            secret_key: None,
         }
     }
 }
@@ -332,6 +338,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/crawls/{id}/graph", get(crawl_graph))
         .route("/api/projects/{id}", axum::routing::delete(delete_project))
         .route("/api/projects/{id}/config", get(get_config).put(put_config))
+        .route(
+            "/api/projects/{id}/auth",
+            get(get_auth).put(put_auth).delete(delete_auth),
+        )
         .route(
             "/api/projects/{id}/schedule",
             get(get_schedule).put(put_schedule).delete(delete_schedule),
@@ -766,6 +776,82 @@ async fn put_config(
     Ok(Json(cfg))
 }
 
+// ---- accès aux sites protégés -----------------------------------------------------------------
+
+const AUTH_DISABLED: &str =
+    "identifiants désactivés : définissez CALLISTSEO_SECRET_KEY sur le serveur (openssl rand -hex 32)";
+
+/// Ce que l'on peut savoir des identifiants : leur présence et leur nature, jamais leurs valeurs
+/// (noms d'en-têtes compris : ils peuvent eux-mêmes être parlants).
+async fn get_auth(State(s): State<AppState>, Path(id): Path<i64>) -> ApiResult<Json<Value>> {
+    let (exists, blob) = s
+        .db(move |st| Ok((st.project(id)?.is_some(), st.project_secret(id)?)))
+        .await?;
+    if !exists {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "projet introuvable"));
+    }
+    let body = match (&s.cfg.secret_key, &blob) {
+        (Some(key), Some(b)) => secrets::decrypt(key, id, b).ok(),
+        _ => None,
+    };
+    Ok(Json(json!({
+        "available": s.cfg.secret_key.is_some(),
+        "configured": blob.is_some(),
+        "readable": body.is_some() || blob.is_none(),
+        "basic": body.as_ref().is_some_and(|b| b.basic.is_some()),
+        "headers": body.as_ref().map_or(0, |b| b.headers.len()),
+        "cookies": body.as_ref().is_some_and(|b| b.cookies.is_some()),
+    })))
+}
+
+async fn put_auth(
+    State(s): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<secrets::AuthBody>,
+) -> ApiResult<StatusCode> {
+    let Some(key) = s.cfg.secret_key.clone() else {
+        return Err(ApiError::new(StatusCode::CONFLICT, AUTH_DISABLED));
+    };
+    let auth = body.to_core();
+    if auth.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "aucun identifiant : utilisez DELETE pour les retirer",
+        ));
+    }
+    callistseo_crawler::validate_auth(&auth)
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
+    let blob = secrets::encrypt(&key, id, &body).map_err(ApiError::internal)?;
+    if !s.db(move |st| st.set_project_secret(id, &blob)).await? {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "projet introuvable"));
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Retirer les identifiants reste possible sans clé (par exemple après l'avoir perdue).
+async fn delete_auth(State(s): State<AppState>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+    if s.db(move |st| st.delete_project_secret(id)).await? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::new(StatusCode::NOT_FOUND, "aucun identifiant"))
+    }
+}
+
+/// Identifiants déchiffrés du projet pour un audit ; aucun s'il n'y en a pas.
+async fn project_auth(s: &AppState, project_id: i64) -> ApiResult<callistseo_core::SiteAuth> {
+    let Some(blob) = s.db(move |st| st.project_secret(project_id)).await? else {
+        return Ok(Default::default());
+    };
+    let key = s
+        .cfg
+        .secret_key
+        .as_ref()
+        .ok_or_else(|| ApiError::new(StatusCode::CONFLICT, AUTH_DISABLED))?;
+    secrets::decrypt(key, project_id, &blob)
+        .map(|b| b.to_core())
+        .map_err(|e| ApiError::new(StatusCode::CONFLICT, e))
+}
+
 #[derive(Deserialize, Default)]
 struct CrawlRequest {
     /// Délai minimal entre deux requêtes (ms), borné par le serveur.
@@ -811,7 +897,11 @@ async fn launch_crawl(s: &AppState, project_id: i64, req: CrawlRequest) -> ApiRe
         concurrency: req.concurrency.or(project_cfg.concurrency),
         delay_ms: req.delay_ms.or(project_cfg.delay_ms),
     };
+    // Un projet protégé dont les identifiants sont illisibles n'est pas audité sans eux (on
+    // obtiendrait des pages de connexion à la place du site).
+    let auth = project_auth(s, project_id).await?;
     let cfg = CrawlConfig {
+        auth,
         scope: project_cfg.scope(),
         extractors: project_cfg.core_extractors().map_err(ApiError::internal)?,
         check_external: project_cfg.check_external,
@@ -2712,6 +2802,114 @@ mod tests {
             "{status}"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn site_credentials_are_write_only_encrypted_and_need_the_key() {
+        let body = json!({
+            "basic": {"user": "robot", "password": "s3cret-mdp"},
+            "headers": [{"name": "X-Preprod-Key", "value": "cle-privee"}],
+            "cookies": "session=abc"
+        });
+        let new_project = |app: Router| async move {
+            let (st, p) = json_call(
+                &app,
+                Method::POST,
+                "/api/projects",
+                Some(json!({"name": "p", "start_url": "https://exemple.fr/"})),
+            )
+            .await;
+            assert_eq!(st, StatusCode::CREATED, "{p}");
+            p["id"].as_i64().unwrap()
+        };
+
+        // Sans clé : fonction désactivée, mais l'état reste lisible.
+        let (app, _) = app();
+        let id = new_project(app.clone()).await;
+        let uri = format!("/api/projects/{id}/auth");
+        let (st, _) = json_call(&app, Method::PUT, &uri, Some(body.clone())).await;
+        assert_eq!(st, StatusCode::CONFLICT);
+        let (_, state) = json_call(&app, Method::GET, &uri, None).await;
+        assert_eq!(
+            (state["available"].clone(), state["configured"].clone()),
+            (json!(false), json!(false))
+        );
+
+        let key = SecretKey::from_hex(&"a".repeat(64)).unwrap();
+        let (app, st8) = app_with(ApiConfig {
+            secret_key: Some(key),
+            ..ApiConfig::default()
+        });
+        let id = new_project(app.clone()).await;
+        let uri = format!("/api/projects/{id}/auth");
+        // Refusés : en-tête réservé, champ inconnu, rien du tout.
+        for bad in [
+            json!({"headers": [{"name": "User-Agent", "value": "Mozilla"}]}),
+            json!({"password": "x"}),
+            json!({}),
+        ] {
+            let (st, _) = json_call(&app, Method::PUT, &uri, Some(bad.clone())).await;
+            assert!(st.is_client_error(), "{bad} → {st}");
+        }
+        let (st, _) = json_call(&app, Method::PUT, &uri, Some(body)).await;
+        assert_eq!(st, StatusCode::NO_CONTENT);
+
+        // Lecture : présence et nature seulement, aucune valeur.
+        let (st, bytes) = call(&app, Method::GET, &uri, None, None).await;
+        let text = String::from_utf8_lossy(&bytes);
+        assert_eq!(st, StatusCode::OK);
+        for secret in ["robot", "s3cret", "cle-privee", "Preprod", "abc"] {
+            assert!(!text.contains(secret), "{secret} renvoyé : {text}");
+        }
+        let state: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(state["configured"], json!(true));
+        assert_eq!(
+            (
+                state["basic"].clone(),
+                state["headers"].clone(),
+                state["cookies"].clone()
+            ),
+            (json!(true), json!(1), json!(true))
+        );
+
+        // En base : chiffré.
+        let blob = st8
+            .db(move |st| st.project_secret(id))
+            .await
+            .ok()
+            .flatten()
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&blob).contains("s3cret"));
+        // L'audit reçoit les identifiants déchiffrés.
+        let auth = project_auth(&st8, id).await.ok().unwrap();
+        assert_eq!(auth.basic, Some(("robot".into(), "s3cret-mdp".into())));
+
+        // Clé changée : l'audit est refusé plutôt que lancé sans identifiants.
+        let other = AppState {
+            cfg: Arc::new(ApiConfig {
+                secret_key: Some(SecretKey::from_hex(&"b".repeat(64)).unwrap()),
+                ..ApiConfig::default()
+            }),
+            ..st8.clone()
+        };
+        let other_app = router(other);
+        let (st, err) = json_call(
+            &other_app,
+            Method::POST,
+            &format!("/api/projects/{id}/crawls"),
+            None,
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "{err}");
+        assert!(err["error"].as_str().unwrap().contains("illisibles"));
+        let (_, state) = json_call(&other_app, Method::GET, &uri, None).await;
+        assert_eq!(state["readable"], json!(false));
+
+        // Retrait possible même sans la bonne clé.
+        let (st, _) = json_call(&other_app, Method::DELETE, &uri, None).await;
+        assert_eq!(st, StatusCode::NO_CONTENT);
+        let (_, state) = json_call(&app, Method::GET, &uri, None).await;
+        assert_eq!(state["configured"], json!(false));
     }
 
     #[tokio::test]

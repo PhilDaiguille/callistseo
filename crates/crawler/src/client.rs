@@ -1,4 +1,4 @@
-use callistseo_core::CrawlConfig;
+use callistseo_core::{CrawlConfig, SiteAuth};
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use reqwest::redirect::Policy;
 use std::error::Error;
@@ -77,6 +77,62 @@ pub struct Client {
     http: reqwest::Client,
     max_body: usize,
     allow_private: bool,
+    /// Identifiants et la seule origine qui les reçoit (voir `for_site`).
+    auth: Option<(url::Origin, SiteAuth)>,
+}
+
+/// En-têtes que l'accès à un site ne peut pas remplacer : protocole, identifiant du robot (fixé
+/// par l'opérateur) et ceux qui ont leur propre champ (`Cookie`).
+const RESERVED_HEADERS: &[&str] = &[
+    "host",
+    "content-length",
+    "transfer-encoding",
+    "connection",
+    "user-agent",
+    "cookie",
+    "accept-encoding",
+];
+
+/// Refuse des identifiants qui donneraient une requête invalide ou contourneraient une limite.
+pub fn validate_auth(a: &SiteAuth) -> Result<(), String> {
+    use reqwest::header::{HeaderName, HeaderValue};
+    const MAX_VALUE: usize = 8 * 1024;
+    let printable = |v: &str| v.chars().all(|c| c == ' ' || c.is_ascii_graphic());
+    if let Some((user, pass)) = &a.basic {
+        if user.is_empty() || user.contains(':') || !printable(user) || !printable(pass) {
+            return Err("authentification Basic : utilisateur non vide, sans « : », caractères ASCII imprimables".into());
+        }
+        if user.len() + pass.len() > MAX_VALUE {
+            return Err("authentification Basic trop longue".into());
+        }
+    }
+    if a.headers.len() > 20 {
+        return Err("20 en-têtes au plus".into());
+    }
+    for (name, value) in &a.headers {
+        let lower = name.to_ascii_lowercase();
+        if HeaderName::from_bytes(name.as_bytes()).is_err() {
+            return Err(format!("nom d'en-tête invalide : {name}"));
+        }
+        if RESERVED_HEADERS.contains(&lower.as_str()) {
+            return Err(format!("en-tête réservé : {name}"));
+        }
+        if lower == "authorization" && a.basic.is_some() {
+            return Err("Authorization et authentification Basic : choisir l'un des deux".into());
+        }
+        if value.len() > MAX_VALUE || HeaderValue::from_str(value).is_err() || !printable(value) {
+            return Err(format!("valeur d'en-tête invalide pour {name}"));
+        }
+    }
+    if let Some(c) = &a.cookies {
+        if c.is_empty() || c.len() > MAX_VALUE || !printable(c) {
+            return Err(
+                "cookies : 1 à 8 192 caractères ASCII imprimables (nom=valeur; nom2=valeur2)"
+                    .into(),
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Un user-agent vide, trop long ou avec des caractères de contrôle/non ASCII est refusé
@@ -108,7 +164,38 @@ impl Client {
             http: b.build().map_err(|e| e.to_string())?,
             max_body: cfg.max_body_bytes,
             allow_private: cfg.allow_private,
+            auth: None,
         })
+    }
+
+    /// Client d'un audit : les identifiants de `cfg.auth` ne partent que vers l'origine de `start`
+    /// (même schéma, hôte et port). Ni les autres sites, ni la version HTTP d'un site HTTPS.
+    pub fn for_site(cfg: &CrawlConfig, start: &Url) -> Result<Self, String> {
+        let mut c = Self::new(cfg)?;
+        if !cfg.auth.is_empty() {
+            validate_auth(&cfg.auth)?;
+            c.auth = Some((start.origin(), cfg.auth.clone()));
+        }
+        Ok(c)
+    }
+
+    /// Requête GET, avec les identifiants si `url` est l'origine de l'audit.
+    fn get(&self, url: &Url) -> reqwest::RequestBuilder {
+        let mut req = self.http.get(url.clone());
+        if let Some((origin, auth)) = &self.auth {
+            if url.origin() == *origin {
+                if let Some((user, pass)) = &auth.basic {
+                    req = req.basic_auth(user, Some(pass));
+                }
+                for (name, value) in &auth.headers {
+                    req = req.header(name, value);
+                }
+                if let Some(c) = &auth.cookies {
+                    req = req.header(reqwest::header::COOKIE, c);
+                }
+            }
+        }
+        req
     }
 
     /// Les IP littérales ne passent pas par le résolveur : on les vérifie ici.
@@ -148,7 +235,7 @@ impl Client {
     /// Comme `get_text`, mais l'erreur porte le statut HTTP (`None` = échec réseau ou URL interdite).
     async fn get_text_status(&self, url: &Url, max: usize) -> Result<String, Option<u16>> {
         self.check(url).map_err(|_| None)?;
-        let mut resp = self.http.get(url.clone()).send().await.map_err(|_| None)?;
+        let mut resp = self.get(url).send().await.map_err(|_| None)?;
         if !resp.status().is_success() {
             return Err(Some(resp.status().as_u16()));
         }
@@ -166,7 +253,7 @@ impl Client {
     pub async fn fetch(&self, url: &Url) -> Result<Fetched, String> {
         self.check(url)?;
         let started = std::time::Instant::now();
-        let mut resp = self.http.get(url.clone()).send().await.map_err(chain)?;
+        let mut resp = self.get(url).send().await.map_err(chain)?;
         let ttfb = started.elapsed();
         let status = resp.status().as_u16();
         let headers: Vec<(String, String)> = callistseo_core::RECORDED_HEADERS

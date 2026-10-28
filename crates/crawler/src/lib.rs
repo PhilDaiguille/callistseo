@@ -7,7 +7,7 @@ mod scope;
 mod sitemap;
 
 pub use adaptive::CrawlStats;
-pub use client::{is_forbidden, validate_user_agent, Client};
+pub use client::{is_forbidden, validate_auth, validate_user_agent, Client};
 pub use extract::{valid_name as valid_extractor_name, Extractors};
 pub use scope::Scope;
 
@@ -72,7 +72,7 @@ pub async fn crawl_live(
     stats: Arc<CrawlStats>,
     live: Option<tokio::sync::mpsc::UnboundedSender<CrawledPage>>,
 ) -> Result<Vec<CrawledPage>, String> {
-    let client = Arc::new(Client::new(&cfg)?);
+    let client = Arc::new(Client::for_site(&cfg, &start)?);
     let scope = Scope::new(&cfg.scope)?;
     let extractors = Arc::new(Extractors::new(&cfg.extractors)?);
     let host = start.host_str().map(str::to_owned);

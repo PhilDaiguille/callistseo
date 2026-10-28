@@ -992,3 +992,135 @@ async fn hostile_pages_never_crash_the_crawl_or_the_rules() {
     let issues = callistseo_seo_rules::analyze(&pages, &Default::default());
     assert!(!issues.is_empty());
 }
+
+/// Serveur qui garde chaque requête brute reçue ; `body` donne le corps selon le chemin
+/// (`{PORT}` remplacé par le port d'un autre serveur, `other`).
+async fn recording_server(
+    body: fn(&str) -> (u16, String),
+) -> (Url, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = seen.clone();
+    tokio::spawn(async move {
+        loop {
+            let (mut s, _) = listener.accept().await.unwrap();
+            let log = log.clone();
+            tokio::spawn(async move {
+                let mut buf = [0u8; 8192];
+                let n = s.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let path = req.split_whitespace().nth(1).unwrap_or("/").to_owned();
+                log.lock().unwrap().push(req);
+                let (status, body) = body(&path);
+                let resp = format!(
+                    "HTTP/1.1 {status} X\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = s.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+    (
+        Url::parse(&format!("http://127.0.0.1:{port}/")).unwrap(),
+        seen,
+    )
+}
+
+#[tokio::test]
+async fn site_credentials_go_to_the_audited_origin_only() {
+    use callistseo_core::SiteAuth;
+    use std::sync::OnceLock;
+    // Port du site tiers, connu après son démarrage (les fonctions de corps n'ont pas de contexte).
+    static OTHER: OnceLock<u16> = OnceLock::new();
+    let (other, other_seen) = recording_server(|_| (200, "tiers".into())).await;
+    OTHER.set(other.port().unwrap()).unwrap();
+    let (site, site_seen) = recording_server(|path| match path {
+        "/" => (
+            200,
+            format!(
+                r#"<a href="/prive">p</a><a href="http://localhost:{}/x">tiers</a>"#,
+                OTHER.get().unwrap()
+            ),
+        ),
+        _ => (200, "privé".into()),
+    })
+    .await;
+
+    let cfg = CrawlConfig {
+        check_external: true,
+        auth: SiteAuth {
+            basic: Some(("robot".into(), "s3cret".into())),
+            headers: vec![("X-Preprod-Key".into(), "cle-123".into())],
+            cookies: Some("session=abc".into()),
+        },
+        ..local_cfg()
+    };
+    let pages = crawl(site, cfg).await.unwrap();
+    assert_eq!(pages.len(), 2);
+
+    let site_reqs = site_seen.lock().unwrap().clone();
+    // robots.txt, sitemap.xml, / et /prive : toutes avec les identifiants.
+    let pages_reqs: Vec<_> = site_reqs
+        .iter()
+        .filter(|r| r.starts_with("GET / ") || r.starts_with("GET /prive "))
+        .collect();
+    assert_eq!(pages_reqs.len(), 2);
+    for r in &site_reqs {
+        let lower = r.to_ascii_lowercase();
+        // « robot:s3cret » en Base64.
+        assert!(
+            lower.contains("authorization: basic cm9ib3q6cznjcmv0"),
+            "{r}"
+        );
+        assert!(lower.contains("x-preprod-key: cle-123"), "{r}");
+        assert!(lower.contains("cookie: session=abc"), "{r}");
+    }
+    // Le site tiers a bien été contacté (lien externe vérifié), sans aucun identifiant.
+    let other_reqs = other_seen.lock().unwrap().clone();
+    assert!(!other_reqs.is_empty());
+    for r in &other_reqs {
+        let lower = r.to_ascii_lowercase();
+        assert!(
+            !lower.contains("authorization")
+                && !lower.contains("x-preprod-key")
+                && !lower.contains("cookie")
+                && !lower.contains("s3cret"),
+            "fuite vers le site tiers : {r}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn invalid_site_credentials_fail_before_any_request() {
+    use callistseo_core::SiteAuth;
+    for auth in [
+        SiteAuth {
+            headers: vec![("User-Agent".into(), "Mozilla".into())],
+            ..SiteAuth::default()
+        },
+        SiteAuth {
+            headers: vec![("X-A".into(), "ligne\r\nX-B: injectée".into())],
+            ..SiteAuth::default()
+        },
+        SiteAuth {
+            basic: Some(("a:b".into(), "c".into())),
+            ..SiteAuth::default()
+        },
+    ] {
+        let cfg = CrawlConfig {
+            auth,
+            ..local_cfg()
+        };
+        let err = crawl("http://127.0.0.1:1/".parse().unwrap(), cfg)
+            .await
+            .unwrap_err();
+        assert!(!err.contains("Mozilla") || err.contains("réservé"), "{err}");
+    }
+    // Le Debug ne révèle rien.
+    let auth = SiteAuth {
+        basic: Some(("u".into(), "motdepasse".into())),
+        ..SiteAuth::default()
+    };
+    assert!(!format!("{auth:?}").contains("motdepasse"));
+}
