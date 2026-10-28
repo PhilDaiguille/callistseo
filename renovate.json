@@ -14,6 +14,14 @@
   ],
   "minimumReleaseAge": "3 days",
   "platformAutomerge": false,
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "description": "CVE (alertes GitHub et base OSV) : PR à part, ouverte tout de suite, sans planning ni délai de 3 jours (défauts de Renovate). Fusion automatique selon le type : correctif ou mineure oui, majeure non.",
+    "labels": [
+      "dépendances",
+      "sécurité"
+    ]
+  },
   "packageRules": [
     {
       "description": "Mineures et correctifs, tous écosystèmes : une seule PR, fusionnée seule une fois la CI verte.",
