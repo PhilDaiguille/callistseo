@@ -168,6 +168,27 @@ CREATE TABLE project_secrets (
     data BLOB NOT NULL
 );
 ",
+    // v15 : intégrations externes (PageSpeed, Search Console, GA4) : mesures par page, état par
+    // audit, clés chiffrées par projet.
+    "
+ALTER TABLE pages ADD COLUMN psi_score INTEGER;
+ALTER TABLE pages ADD COLUMN lcp_ms INTEGER;
+ALTER TABLE pages ADD COLUMN cls REAL;
+ALTER TABLE pages ADD COLUMN inp_ms INTEGER;
+ALTER TABLE pages ADD COLUMN cwv_source TEXT;
+ALTER TABLE pages ADD COLUMN gsc_clicks INTEGER;
+ALTER TABLE pages ADD COLUMN gsc_impressions INTEGER;
+ALTER TABLE pages ADD COLUMN gsc_ctr REAL;
+ALTER TABLE pages ADD COLUMN gsc_position REAL;
+ALTER TABLE pages ADD COLUMN ga4_sessions INTEGER;
+ALTER TABLE pages ADD COLUMN ga4_views INTEGER;
+ALTER TABLE pages ADD COLUMN ga4_engagement REAL;
+ALTER TABLE crawl_runs ADD COLUMN integrations TEXT;
+CREATE TABLE integration_secrets (
+    project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    data BLOB NOT NULL
+);
+",
 ];
 
 /// Nœud du graphe de liens : (URL, profondeur, statut HTTP).
@@ -223,6 +244,36 @@ pub struct RunInfo {
     pub pages: i64,
     pub errors: i64,
     pub warnings: i64,
+    /// État des intégrations externes de l'audit (JSON), `None` si aucune n'a tourné.
+    pub integrations: Option<String>,
+}
+
+/// Mesures PageSpeed d'une page : score Lighthouse (0-100) et Core Web Vitals, du terrain (CrUX)
+/// quand Google en a, sinon du laboratoire (`source`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PsiMetrics {
+    pub score: Option<i64>,
+    pub lcp_ms: Option<i64>,
+    pub cls: Option<f64>,
+    pub inp_ms: Option<i64>,
+    pub source: &'static str,
+}
+
+/// Search Console (28 jours) : clics, impressions, CTR (0-1), position moyenne.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GscMetrics {
+    pub clicks: i64,
+    pub impressions: i64,
+    pub ctr: f64,
+    pub position: f64,
+}
+
+/// GA4 (28 jours) : sessions, vues, taux d'engagement (0-1).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Ga4Metrics {
+    pub sessions: i64,
+    pub views: i64,
+    pub engagement: f64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -360,6 +411,146 @@ impl Store {
             )
             .map_err(db)?;
         Ok(n > 0)
+    }
+
+    /// Clés des intégrations du projet (blob opaque chiffré par l'API).
+    pub fn integration_secret(&self, id: i64) -> Result<Option<Vec<u8>>> {
+        self.conn
+            .query_row(
+                "SELECT data FROM integration_secrets WHERE project_id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(db)
+    }
+
+    /// Remplace les clés (`None` = les retirer) ; `false` si le projet n'existe pas.
+    pub fn set_integration_secret(&mut self, id: i64, data: Option<&[u8]>) -> Result<bool> {
+        if self.project(id)?.is_none() {
+            return Ok(false);
+        }
+        match data {
+            Some(d) => self.conn.execute(
+                "INSERT INTO integration_secrets (project_id, data) VALUES (?1, ?2)
+                 ON CONFLICT (project_id) DO UPDATE SET data = excluded.data",
+                params![id, d],
+            ),
+            None => self.conn.execute(
+                "DELETE FROM integration_secrets WHERE project_id = ?1",
+                [id],
+            ),
+        }
+        .map_err(db)?;
+        Ok(true)
+    }
+
+    /// État des intégrations d'un audit (JSON libre, affiché tel quel par l'interface).
+    pub fn set_run_integrations(&mut self, run_id: i64, json: &str) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE crawl_runs SET integrations = ?2 WHERE id = ?1",
+                params![run_id, json],
+            )
+            .map_err(db)
+            .map(drop)
+    }
+
+    /// Mesures PageSpeed, rattachées aux pages de l'audit par URL exacte.
+    pub fn set_psi(&mut self, run_id: i64, rows: &[(String, PsiMetrics)]) -> Result<()> {
+        let tx = self.conn.transaction().map_err(db)?;
+        {
+            let mut st = tx
+                .prepare(
+                    "UPDATE pages SET psi_score = ?3, lcp_ms = ?4, cls = ?5, inp_ms = ?6, cwv_source = ?7
+                     WHERE run_id = ?1 AND url = ?2",
+                )
+                .map_err(db)?;
+            for (url, m) in rows {
+                st.execute(params![
+                    run_id, url, m.score, m.lcp_ms, m.cls, m.inp_ms, m.source
+                ])
+                .map_err(db)?;
+            }
+        }
+        tx.commit().map_err(db)
+    }
+
+    /// Search Console : les pages de l'audit absentes du rapport reçoivent 0 (aucune impression).
+    pub fn set_gsc(&mut self, run_id: i64, rows: &[(String, GscMetrics)]) -> Result<()> {
+        let tx = self.conn.transaction().map_err(db)?;
+        tx.execute(
+            "UPDATE pages SET gsc_clicks = 0, gsc_impressions = 0, gsc_ctr = 0, gsc_position = NULL
+             WHERE run_id = ?1",
+            [run_id],
+        )
+        .map_err(db)?;
+        {
+            let mut st = tx
+                .prepare(
+                    "UPDATE pages SET gsc_clicks = ?3, gsc_impressions = ?4, gsc_ctr = ?5, gsc_position = ?6
+                     WHERE run_id = ?1 AND url = ?2",
+                )
+                .map_err(db)?;
+            for (url, m) in rows {
+                st.execute(params![
+                    run_id,
+                    url,
+                    m.clicks,
+                    m.impressions,
+                    m.ctr,
+                    m.position
+                ])
+                .map_err(db)?;
+            }
+        }
+        tx.commit().map_err(db)
+    }
+
+    /// GA4 : les pages de l'audit absentes du rapport reçoivent 0 session.
+    pub fn set_ga4(&mut self, run_id: i64, rows: &[(String, Ga4Metrics)]) -> Result<()> {
+        let tx = self.conn.transaction().map_err(db)?;
+        tx.execute(
+            "UPDATE pages SET ga4_sessions = 0, ga4_views = 0, ga4_engagement = NULL WHERE run_id = ?1",
+            [run_id],
+        )
+        .map_err(db)?;
+        {
+            let mut st = tx
+                .prepare(
+                    "UPDATE pages SET ga4_sessions = ?3, ga4_views = ?4, ga4_engagement = ?5
+                     WHERE run_id = ?1 AND url = ?2",
+                )
+                .map_err(db)?;
+            for (url, m) in rows {
+                st.execute(params![run_id, url, m.sessions, m.views, m.engagement])
+                    .map_err(db)?;
+            }
+        }
+        tx.commit().map_err(db)
+    }
+
+    /// Problèmes ajoutés après coup (règles sur les mesures externes).
+    pub fn add_issues(&mut self, run_id: i64, issues: &[Issue]) -> Result<()> {
+        let tx = self.conn.transaction().map_err(db)?;
+        {
+            let mut st = tx
+                .prepare(
+                    "INSERT INTO issues (run_id, rule, severity, url, message) VALUES (?1, ?2, ?3, ?4, ?5)",
+                )
+                .map_err(db)?;
+            for i in issues {
+                st.execute(params![
+                    run_id,
+                    i.rule,
+                    i.severity.as_str(),
+                    i.url.as_str(),
+                    i.message
+                ])
+                .map_err(db)?;
+            }
+        }
+        tx.commit().map_err(db)
     }
 
     /// Identifiants chiffrés du projet (blob opaque, chiffré et lu par l'API).
@@ -712,6 +903,12 @@ impl Store {
                 [now()],
             )
             .map_err(db)?;
+        // Intégrations coupées par l'arrêt : leur état « en cours » ne finirait jamais.
+        tx.execute(
+            "UPDATE crawl_runs SET integrations = '{\"interrompu\":true}' WHERE integrations LIKE '%\"en_cours\":true%'",
+            [],
+        )
+        .map_err(db)?;
         tx.commit().map_err(db)?;
         Ok(n)
     }
@@ -783,7 +980,8 @@ impl Store {
                 "SELECT r.id, r.project_id, p.name, p.start_url, r.status, r.started_at, r.finished_at, r.error,
                     (SELECT COUNT(*) FROM pages WHERE run_id = r.id),
                     (SELECT COUNT(*) FROM issues WHERE run_id = r.id AND severity = 'Error'),
-                    (SELECT COUNT(*) FROM issues WHERE run_id = r.id AND severity = 'Warning')
+                    (SELECT COUNT(*) FROM issues WHERE run_id = r.id AND severity = 'Warning'),
+                    r.integrations
                  FROM crawl_runs r JOIN projects p ON p.id = r.project_id
                  WHERE (?1 IS NULL OR r.project_id = ?1) AND (?2 IS NULL OR r.id = ?2)
                  ORDER BY r.id DESC",
@@ -803,6 +1001,7 @@ impl Store {
                     pages: r.get(8)?,
                     errors: r.get(9)?,
                     warnings: r.get(10)?,
+                    integrations: r.get(11)?,
                 })
             })
             .map_err(db)?;
@@ -1829,6 +2028,78 @@ mod tests {
         drop(Store::open(&path).unwrap());
         assert!(!bak.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn external_metrics_attach_by_url_and_missing_pages_get_zero() {
+        let mut store = Store::open_in_memory().unwrap();
+        let (pages, issues) = sample();
+        let run = store
+            .save_run("a", &u("/"), &CrawlConfig::default(), &pages, &issues)
+            .unwrap();
+        let root = u("/").to_string();
+        store
+            .set_psi(
+                run,
+                &[(
+                    root.clone(),
+                    PsiMetrics {
+                        score: Some(42),
+                        lcp_ms: Some(4100),
+                        cls: Some(0.3),
+                        inp_ms: None,
+                        source: "terrain",
+                    },
+                )],
+            )
+            .unwrap();
+        let gsc = GscMetrics {
+            clicks: 3,
+            impressions: 100,
+            ctr: 0.03,
+            position: 7.5,
+        };
+        store
+            .set_gsc(
+                run,
+                &[
+                    (root.clone(), gsc),
+                    ("http://autre/".into(), GscMetrics::default()),
+                ],
+            )
+            .unwrap();
+        store.set_ga4(run, &[]).unwrap();
+        store.set_run_integrations(run, r#"{"psi":"ok"}"#).unwrap();
+        let get = |sql: &str| -> (Option<i64>, Option<i64>) {
+            store
+                .conn
+                .query_row(sql, [run], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+        };
+        assert_eq!(
+            get("SELECT psi_score, gsc_impressions FROM pages WHERE run_id = ?1 AND url = 'http://a.test/'"),
+            (Some(42), Some(100))
+        );
+        // Page non mesurée : PageSpeed vide, Search Console et GA4 à zéro.
+        assert_eq!(
+            get("SELECT psi_score, gsc_impressions FROM pages WHERE run_id = ?1 AND url = 'http://a.test/x'"),
+            (None, Some(0))
+        );
+        let before = store.run(run).unwrap().unwrap();
+        store
+            .add_issues(
+                run,
+                &[Issue {
+                    rule: "cwv-lcp-poor",
+                    severity: callistseo_core::Severity::Warning,
+                    url: u("/"),
+                    message: "LCP".into(),
+                }],
+            )
+            .unwrap();
+        let after = store.run(run).unwrap().unwrap();
+        assert_eq!(after.warnings, before.warnings + 1);
+        assert_eq!(after.integrations.as_deref(), Some(r#"{"psi":"ok"}"#));
     }
 
     #[test]

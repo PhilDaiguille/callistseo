@@ -19,7 +19,7 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 | Docker / web | 🟡 | image durcie et publiée (ghcr), HTTPS par Caddy, CSP, limite de connexion, journal d'accès ; reste : comptes |
 | Site vitrine | ✅ | `site/index.html` autonome ; reste : domaine et publication |
 | Performance et mémoire | ✅ | 49 Mo pour 6 000 pages denses, banc reproductible |
-| Intégrations externes | ⬜ | phase 6 |
+| Intégrations externes | 🟡 | phase 6 (code et tests faits, reste la validation contre les vraies API) |
 | Rendu JavaScript | ⏸ | phase 7 |
 
 ## Prochaines étapes
@@ -64,7 +64,7 @@ Rendu JavaScript (Chrome piloté + proxy appliquant le filtre anti-SSRF), JavaSc
 | 3 | 59 règles SEO + sitemap XML : quasi-doublons (simhash), liens externes (`--check-external`), AMP, microdata, JSON-LD par type, `lastmod`, ancres, benchmark à comptes exacts | ✅ |
 | 4 | Poste de travail : 22 rapports, tableau virtualisé, inspecteur, ⌘K, pause / reprise / arrêt | ✅ |
 | 5 | Configuration : périmètre par projet, robots.txt d'essai, planification, segments, extraction personnalisée (regex, CSS, XPath, recherche), sites protégés (Basic, en-têtes, cookies, formulaire) | ✅ |
-| 6 | Intégrations externes | ⬜ |
+| 6 | Intégrations externes : PageSpeed, Search Console, GA4 (compte de service), clés chiffrées, écran de consentement, règles CWV / impressions. Reste : essai sur de vrais comptes Google, OpenAI / Gemini | 🟡 |
 | 7 | Rendu JavaScript et le reste | ⏸ |
 
 **Lot IA / GEO 2026** : `ai-snippet-blocked`, `schema-faq-howto-retired` (officielles, doc Search Central) ; `ai-crawler-blocked`, `article-author-missing`, `article-date-missing` (bonnes pratiques GEO, étiquetées comme non exigées par Google). Aucune exigence spéciale de Google pour AI Overviews / AI Mode, pas de `llms.txt` requis, aucune règle « 2027 » (rien d'officiel annoncé).

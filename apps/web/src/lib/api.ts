@@ -227,6 +227,27 @@ export interface ProjectConfig {
   delay_ms: number | null
   concurrency: number | null
   extractors: ExtractorDef[]
+  integrations?: IntegrationsConfig
+}
+
+/** Intégrations externes, activées par projet (une intégration absente est désactivée). */
+export interface IntegrationsConfig {
+  psi?: { strategy: 'mobile' | 'desktop'; max_urls: number }
+  gsc?: { property: string }
+  ga4?: { property_id: string }
+}
+
+/** État des clés d'intégrations : jamais leurs valeurs. */
+export interface IntegrationKeysState {
+  available: boolean
+  readable: boolean
+  psi_key: boolean
+  service_account: string | null
+}
+
+export interface IntegrationKeysBody {
+  psi_key?: string
+  service_account?: string
 }
 
 /** État des identifiants d'un projet : jamais leurs valeurs. */
@@ -371,6 +392,9 @@ export const api = {
   siteAuth: (id: number) => request<SiteAuthState>(`/api/projects/${id}/auth`),
   saveSiteAuth: (id: number, body: SiteAuthBody) => request<null>(`/api/projects/${id}/auth`, { method: 'PUT', body }),
   deleteSiteAuth: (id: number) => request<null>(`/api/projects/${id}/auth`, { method: 'DELETE' }),
+  integrationKeys: (id: number) => request<IntegrationKeysState>(`/api/projects/${id}/integrations/keys`),
+  saveIntegrationKeys: (id: number, body: IntegrationKeysBody) =>
+    request<null>(`/api/projects/${id}/integrations/keys`, { method: 'PUT', body }),
   deleteSchedule: (id: number) => request<null>(`/api/projects/${id}/schedule`, { method: 'DELETE' }),
   crawl: (id: number) => request<Crawl>(`/api/crawls/${id}`),
   diff: (before: number, after: number) => request<DiffResult>(`/api/crawls/${before}/diff/${after}`),

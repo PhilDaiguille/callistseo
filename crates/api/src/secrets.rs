@@ -50,8 +50,14 @@ impl SecretKey {
     }
 }
 
-fn aad(project_id: i64) -> Vec<u8> {
-    format!("callistseo:projet:{project_id}").into_bytes()
+/// Donnée associée : nature du secret et projet. Un blob d'une table ou d'un projet ne se
+/// déchiffre pas ailleurs.
+fn aad(label: &str, project_id: i64) -> Vec<u8> {
+    match label {
+        // Valeur d'origine des identifiants de site (blobs déjà enregistrés).
+        "site" => format!("callistseo:projet:{project_id}").into_bytes(),
+        _ => format!("callistseo:{label}:{project_id}").into_bytes(),
+    }
 }
 
 /// Forme JSON des identifiants (corps de `PUT /api/projects/{id}/auth`, et texte chiffré).
@@ -116,7 +122,21 @@ impl AuthBody {
 }
 
 pub fn encrypt(key: &SecretKey, project_id: i64, auth: &AuthBody) -> Result<Vec<u8>, String> {
-    let plain = serde_json::to_vec(auth).map_err(|e| e.to_string())?;
+    seal(key, "site", project_id, auth)
+}
+
+pub fn decrypt(key: &SecretKey, project_id: i64, blob: &[u8]) -> Result<AuthBody, String> {
+    open(key, "site", project_id, blob)
+}
+
+/// Chiffre une valeur JSON sous l'étiquette `label` (`site`, `integrations`).
+pub fn seal<T: Serialize>(
+    key: &SecretKey,
+    label: &str,
+    project_id: i64,
+    value: &T,
+) -> Result<Vec<u8>, String> {
+    let plain = serde_json::to_vec(value).map_err(|e| e.to_string())?;
     let nonce = Nonce::generate();
     let sealed = key
         .cipher()
@@ -124,7 +144,7 @@ pub fn encrypt(key: &SecretKey, project_id: i64, auth: &AuthBody) -> Result<Vec<
             &nonce,
             Payload {
                 msg: &plain,
-                aad: &aad(project_id),
+                aad: &aad(label, project_id),
             },
         )
         .map_err(|_| "chiffrement impossible".to_owned())?;
@@ -135,8 +155,13 @@ pub fn encrypt(key: &SecretKey, project_id: i64, auth: &AuthBody) -> Result<Vec<
     Ok(out)
 }
 
-/// Échoue si la clé a changé, si le blob est abîmé ou s'il vient d'un autre projet.
-pub fn decrypt(key: &SecretKey, project_id: i64, blob: &[u8]) -> Result<AuthBody, String> {
+/// Échoue si la clé a changé, si le blob est abîmé ou s'il vient d'un autre projet ou d'une autre table.
+pub fn open<T: serde::de::DeserializeOwned>(
+    key: &SecretKey,
+    label: &str,
+    project_id: i64,
+    blob: &[u8],
+) -> Result<T, String> {
     let unreadable = || {
         "identifiants illisibles (CALLISTSEO_SECRET_KEY a changé ?) : enregistrez-les à nouveau"
             .to_owned()
@@ -151,7 +176,7 @@ pub fn decrypt(key: &SecretKey, project_id: i64, blob: &[u8]) -> Result<AuthBody
             &nonce,
             Payload {
                 msg: &blob[1 + NONCE_LEN..],
-                aad: &aad(project_id),
+                aad: &aad(label, project_id),
             },
         )
         .map_err(|_| unreadable())?;
@@ -185,6 +210,8 @@ mod tests {
         let mut bad = blob.clone();
         *bad.last_mut().unwrap() ^= 1;
         assert!(decrypt(&key('a'), 7, &bad).is_err());
+        // Un blob d'identifiants ne passe pas pour des clés d'intégration.
+        assert!(open::<serde_json::Value>(&key('a'), "integrations", 7, &blob).is_err());
         // Deux chiffrements du même contenu diffèrent (nonce aléatoire).
         assert_ne!(encrypt(&key('a'), 7, &auth).unwrap(), blob);
     }

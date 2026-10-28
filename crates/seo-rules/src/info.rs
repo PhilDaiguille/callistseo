@@ -92,6 +92,11 @@ pub const RULES: &[RuleInfo] = &[
     r("schema-faq-howto-retired", Severity::Info, "Schéma FAQ/HowTo sans effet", "Google a retiré les résultats enrichis FAQ et HowTo (2026) : le balisage reste valide mais n'a plus d'effet visible dans la recherche."),
     r("ai-crawler-blocked", Severity::Info, "Robot IA interdit", "Bonne pratique GEO, non exigée par Google : le robots.txt interdit tout le site à un robot IA nommé (GPTBot, ClaudeBot, PerplexityBot, CCBot, Google-Extended, Applebot-Extended). Sans conséquence sur Google Search ; à vérifier si vous voulez être cité par ces assistants."),
     r("article-author-missing", Severity::Info, "Article sans auteur", "Bonne pratique GEO/E-E-A-T, non exigée par Google : le JSON-LD Article n'indique pas d'auteur (author)."),
+    r("cwv-lcp-poor", Severity::Warning, "LCP mauvais", "Core Web Vitals : le plus grand élément visible s'affiche en plus de 4 s (données réelles des visiteurs Chrome quand Google en a, sinon mesure de laboratoire PageSpeed). Google le prend en compte dans l'expérience de page."),
+    r("cwv-cls-poor", Severity::Warning, "CLS mauvais", "Core Web Vitals : la mise en page bouge pendant le chargement (CLS au-delà de 0,25) ; images sans dimensions, publicités ou polices en cause le plus souvent."),
+    r("cwv-inp-poor", Severity::Warning, "INP mauvais", "Core Web Vitals : la page réagit en plus de 500 ms aux interactions des visiteurs (données réelles Chrome seulement)."),
+    r("psi-score-low", Severity::Info, "Score PageSpeed faible", "Score de performance Lighthouse (laboratoire, mobile par défaut) sous 50/100. Indicatif : ce sont les Core Web Vitals réels qui comptent pour Google."),
+    r("gsc-no-impressions", Severity::Info, "Aucune impression Google", "Page indexable sans aucune impression dans Search Console sur 28 jours : non indexée, cannibalisée ou sans demande. À vérifier dans l'outil d'inspection d'URL."),
     r("article-date-missing", Severity::Info, "Article sans date", "Bonne pratique GEO, non exigée par Google : le JSON-LD Article n'a ni datePublished ni dateModified (fraîcheur du contenu)."),
 ];
 
@@ -161,7 +166,11 @@ mod tests {
     /// Chaque règle émise par `analyze` (appels `add("…", …)`) doit être décrite ici.
     #[test]
     fn every_emitted_rule_has_info() {
-        let src = concat!(include_str!("lib.rs"), include_str!("extra.rs"));
+        let src = concat!(
+            include_str!("lib.rs"),
+            include_str!("extra.rs"),
+            include_str!("external.rs")
+        );
         let mut emitted: Vec<&str> = vec!["title-duplicate", "description-duplicate"]; // émises via un tableau
         for (i, _) in src.match_indices("add(") {
             let rest = src[i + 4..].trim_start();

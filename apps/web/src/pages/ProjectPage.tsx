@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { RunBadge } from '@/components/Badges'
 import { DeleteProject } from '@/components/DeleteProject'
+import { IntegrationsCard } from '@/components/IntegrationsCard'
 import { ProjectConfigCard } from '@/components/ProjectConfigCard'
 import { ScheduleCard } from '@/components/ScheduleCard'
 import { SiteAuthCard } from '@/components/SiteAuthCard'
@@ -72,6 +73,7 @@ export function ProjectPage() {
         <div className="grid gap-4">
           <ProjectConfigCard projectId={id} />
           <SiteAuthCard projectId={id} />
+          <IntegrationsCard projectId={id} />
         </div>
       )}
 
