@@ -69,7 +69,7 @@ enum Command {
         /// Ne pas suivre les URL plus longues que ce nombre de caractères
         #[arg(long)]
         max_url_length: Option<usize>,
-        /// Extraction personnalisée `nom: type: motif` (type : regex, css, css@attribut, contains) ; répétable
+        /// Extraction personnalisée `nom: type: motif` (type : regex, css, css@attribut, contains, xpath) ; répétable
         #[arg(long = "extract")]
         extract: Vec<String>,
         /// Fichier robots.txt à utiliser à la place de celui du site
@@ -85,6 +85,15 @@ enum Command {
         /// Site protégé : en-tête Cookie (`nom=valeur; nom2=valeur2`)
         #[arg(long, help_heading = "Site protégé")]
         cookie: Option<String>,
+        /// Site protégé : page du formulaire de connexion (sur le site audité)
+        #[arg(long, help_heading = "Site protégé", requires = "login_user")]
+        login_url: Option<String>,
+        /// Site protégé : identifiant du formulaire de connexion
+        #[arg(long, help_heading = "Site protégé", requires = "login_url")]
+        login_user: Option<String>,
+        /// Site protégé : mot de passe du formulaire (sinon la variable CALLISTSEO_LOGIN_PASSWORD)
+        #[arg(long, help_heading = "Site protégé", requires = "login_url")]
+        login_password: Option<String>,
         /// Gravité à partir de laquelle la commande échoue (code retour 1) : utile en CI
         #[arg(long, value_enum, default_value_t = FailOn::Error)]
         fail_on: FailOn,
@@ -253,9 +262,10 @@ fn parse_extractor(spec: &str) -> Result<callistseo_core::Extractor, String> {
         "regex" => ExtractKind::Regex,
         "css" => ExtractKind::Css,
         "contains" => ExtractKind::Contains,
+        "xpath" => ExtractKind::Xpath,
         other => {
             return Err(format!(
-                "--extract : type « {other} » inconnu (regex, css, contains)"
+                "--extract : type « {other} » inconnu (regex, css, contains, xpath)"
             ))
         }
     };
@@ -431,6 +441,7 @@ fn site_auth(
         basic,
         headers,
         cookies: cookie,
+        form: None,
     })
 }
 
@@ -456,6 +467,9 @@ async fn run(cmd: Command) -> Result<ExitCode, String> {
             basic_auth,
             headers,
             cookie,
+            login_url,
+            login_user,
+            login_password,
             allow_private,
             ignore_robots,
             user_agent,
@@ -504,7 +518,22 @@ async fn run(cmd: Command) -> Result<ExitCode, String> {
                     .map(|e| parse_extractor(e))
                     .collect::<Result<_, _>>()?,
                 check_external,
-                auth: site_auth(basic_auth, &headers, cookie)?,
+                auth: callistseo_core::SiteAuth {
+                    form: login_url
+                        .map(|url| {
+                            let password = login_password
+                                .or_else(|| std::env::var("CALLISTSEO_LOGIN_PASSWORD").ok())
+                                .ok_or("--login-url : mot de passe requis (--login-password ou CALLISTSEO_LOGIN_PASSWORD)")?;
+                            Ok::<_, String>(callistseo_core::FormLogin {
+                                url,
+                                username: login_user.unwrap_or_default(),
+                                password,
+                                ..Default::default()
+                            })
+                        })
+                        .transpose()?,
+                    ..site_auth(basic_auth, &headers, cookie)?
+                },
                 ..CrawlConfig::default()
             };
             let mut pages = callistseo_crawler::crawl(start.clone(), cfg.clone()).await?;

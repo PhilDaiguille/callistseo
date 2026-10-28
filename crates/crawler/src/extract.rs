@@ -10,6 +10,7 @@ enum Compiled {
     Regex(Regex),
     Css(scraper::Selector, Option<String>),
     Contains(String),
+    Xpath(skyscraper::xpath::Xpath),
 }
 
 #[derive(Default)]
@@ -63,6 +64,11 @@ impl Extractors {
                     e.attr.clone().filter(|a| !a.is_empty()),
                 ),
                 ExtractKind::Contains => Compiled::Contains(e.pattern.clone()),
+                ExtractKind::Xpath => {
+                    Compiled::Xpath(skyscraper::xpath::parse(&e.pattern).map_err(|_| {
+                        format!("extraction « {} » : expression XPath invalide", e.name)
+                    })?)
+                }
             };
             out.push((e.name.clone(), c));
         }
@@ -76,6 +82,14 @@ impl Extractors {
     /// Valeurs trouvées pour chaque extracteur (bornées) ; `html` est le code source, `doc` son arbre.
     pub fn run(&self, html: &str, doc: &scraper::Html) -> Vec<(String, Vec<String>)> {
         let clip = |s: &str| -> String { s.trim().chars().take(MAX_EXTRACTED_LEN).collect() };
+        // Arbre XPath (second analyseur HTML) : construit seulement si un extracteur XPath existe.
+        // Un document que cet analyseur refuse ne donne simplement aucune valeur XPath.
+        let xpath_tree = self
+            .0
+            .iter()
+            .any(|(_, c)| matches!(c, Compiled::Xpath(_)))
+            .then(|| skyscraper::html::parse(crate::cap_nesting(html, crate::MAX_NESTING)).ok())
+            .flatten();
         let mut out = Vec::new();
         for (name, c) in &self.0 {
             let values: Vec<String> = match c {
@@ -98,6 +112,15 @@ impl Extractors {
                     0 => Vec::new(),
                     n => vec![n.to_string()],
                 },
+                Compiled::Xpath(xp) => match &xpath_tree {
+                    Some(tree) => xpath_values(xp, tree)
+                        .iter()
+                        .map(|v| clip(v))
+                        .filter(|v| !v.is_empty())
+                        .take(MAX_EXTRACTED_VALUES)
+                        .collect(),
+                    None => Vec::new(),
+                },
             };
             if !values.is_empty() {
                 out.push((name.clone(), values));
@@ -105,6 +128,35 @@ impl Extractors {
         }
         out
     }
+}
+
+/// Valeurs textuelles d'un résultat XPath : texte des nœuds, valeur des attributs, atomes.
+fn xpath_values(
+    xp: &skyscraper::xpath::Xpath,
+    tree: &skyscraper::xpath::XpathItemTree,
+) -> Vec<String> {
+    use skyscraper::xpath::grammar::data_model::{AnyAtomicType, XpathItem};
+    use skyscraper::xpath::grammar::XpathItemTreeNode;
+    let Ok(items) = xp.apply(tree) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .take(MAX_EXTRACTED_VALUES * 4)
+        .filter_map(|item| match item {
+            XpathItem::Node(XpathItemTreeNode::AttributeNode(a)) => Some(a.value.clone()),
+            XpathItem::Node(n) => Some(n.text_content(tree)),
+            XpathItem::AnyAtomicType(a) => Some(match a {
+                AnyAtomicType::Boolean(b) => b.to_string(),
+                AnyAtomicType::Integer(i) => i.to_string(),
+                AnyAtomicType::Float(f) => f.to_string(),
+                AnyAtomicType::Double(d) => d.to_string(),
+                AnyAtomicType::String(s) => s.clone(),
+                AnyAtomicType::QName { local_name, .. } => local_name.clone(),
+            }),
+            XpathItem::Function(_) => None,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -126,6 +178,28 @@ mod tests {
         Extractors::new(list)
             .unwrap()
             .run(HTML, &scraper::Html::parse_document(HTML))
+    }
+
+    #[test]
+    fn xpath_reads_text_attributes_and_functions() {
+        let got = run(&[
+            ex("prix", ExtractKind::Xpath, "//span[@class='price']", None),
+            ex("lien", ExtractKind::Xpath, "//a/@href", None),
+            ex("nb", ExtractKind::Xpath, "count(//span)", None),
+            ex("rien", ExtractKind::Xpath, "//table", None),
+        ]);
+        let by = |n: &str| got.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone());
+        assert_eq!(by("prix"), Some(vec!["12 €".into(), "30 €".into()]));
+        assert_eq!(by("lien"), Some(vec!["/a".into()]));
+        assert_eq!(by("nb"), Some(vec!["2".into()]));
+        assert_eq!(by("rien"), None);
+        // Expression invalide : refusée à la configuration, pas pendant l'audit.
+        assert!(Extractors::new(&[ex("x", ExtractKind::Xpath, "//[", None)]).is_err());
+        // HTML que l'analyseur XPath refuse ou trouve étrange : aucune panique.
+        let ex = Extractors::new(&[ex("x", ExtractKind::Xpath, "//a", None)]).unwrap();
+        for html in ["", "<<<>>>", "<a><b></a></b>", "\u{0}<a>x"] {
+            let _ = ex.run(html, &scraper::Html::parse_document(html));
+        }
     }
 
     #[test]

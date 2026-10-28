@@ -124,6 +124,24 @@ pub fn validate_auth(a: &SiteAuth) -> Result<(), String> {
             return Err(format!("valeur d'en-tête invalide pour {name}"));
         }
     }
+    if let Some(f) = &a.form {
+        if f.url.is_empty() || f.username.is_empty() || f.password.is_empty() {
+            return Err(
+                "connexion par formulaire : adresse de la page, identifiant et mot de passe requis"
+                    .into(),
+            );
+        }
+        let long = [&f.url, &f.username, &f.password]
+            .into_iter()
+            .chain(f.username_field.iter())
+            .chain(f.password_field.iter())
+            .any(|v| v.len() > 2048);
+        if long || Url::parse(&f.url).is_err() {
+            return Err(
+                "connexion par formulaire : valeurs trop longues ou adresse invalide".into(),
+            );
+        }
+    }
     if let Some(c) = &a.cookies {
         if c.is_empty() || c.len() > MAX_VALUE || !printable(c) {
             return Err(
@@ -181,7 +199,11 @@ impl Client {
 
     /// Requête GET, avec les identifiants si `url` est l'origine de l'audit.
     fn get(&self, url: &Url) -> reqwest::RequestBuilder {
-        let mut req = self.http.get(url.clone());
+        self.request(reqwest::Method::GET, url)
+    }
+
+    fn request(&self, method: reqwest::Method, url: &Url) -> reqwest::RequestBuilder {
+        let mut req = self.http.request(method, url.clone());
         if let Some((origin, auth)) = &self.auth {
             if url.origin() == *origin {
                 if let Some((user, pass)) = &auth.basic {
@@ -196,6 +218,105 @@ impl Client {
             }
         }
         req
+    }
+
+    /// Connexion par formulaire (si configurée) : charge la page, envoie le formulaire rempli et
+    /// garde les cookies de session pour la suite de l'audit. Tout reste sur l'origine du site.
+    pub async fn log_in(&mut self) -> Result<(), String> {
+        let Some((origin, auth)) = &self.auth else {
+            return Ok(());
+        };
+        let Some(form) = auth.form.clone() else {
+            return Ok(());
+        };
+        let (origin, given) = (origin.clone(), auth.cookies.clone());
+        let fail = |why: &str| format!("connexion au site impossible : {why}");
+        let page =
+            Url::parse(&form.url).map_err(|_| fail("adresse de la page de connexion invalide"))?;
+        if page.origin() != origin {
+            return Err(fail(
+                "la page de connexion doit être sur le site audité (même adresse et protocole)",
+            ));
+        }
+        let mut jar = Vec::new();
+        self.check(&page)?;
+        let resp = self.get(&page).send().await.map_err(|e| fail(&chain(e)))?;
+        crate::login::absorb_cookies(&mut jar, resp.headers());
+        if !resp.status().is_success() {
+            return Err(fail(&format!(
+                "la page de connexion répond {}",
+                resp.status().as_u16()
+            )));
+        }
+        let html = self.read_text(resp).await.map_err(|e| fail(&e))?;
+        let filled = crate::login::fill(&html, &page, &form).map_err(|e| fail(&e))?;
+        if filled.action.origin() != origin {
+            return Err(fail(
+                "le formulaire envoie les identifiants vers un autre site : refusé",
+            ));
+        }
+        self.set_cookies(crate::login::cookie_header(given.as_deref(), &jar));
+        let body: String = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(&filled.fields)
+            .finish();
+        self.check(&filled.action)?;
+        let resp = self
+            .request(reqwest::Method::POST, &filled.action)
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            )
+            .header(reqwest::header::REFERER, page.as_str())
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| fail(&chain(e)))?;
+        crate::login::absorb_cookies(&mut jar, resp.headers());
+        let status = resp.status();
+        if status.is_client_error() || status.is_server_error() {
+            return Err(fail(&format!(
+                "l'envoi du formulaire répond {}",
+                status.as_u16()
+            )));
+        }
+        // Le même formulaire réaffiché après envoi : identifiants refusés.
+        if status.is_success() {
+            let html = self.read_text(resp).await.unwrap_or_default();
+            if crate::login::fill(&html, &page, &form).is_ok() {
+                return Err(fail(
+                    "le formulaire est réaffiché après envoi (identifiants incorrects ?)",
+                ));
+            }
+        }
+        if jar.is_empty() {
+            return Err(fail("aucun cookie de session reçu"));
+        }
+        self.set_cookies(crate::login::cookie_header(given.as_deref(), &jar));
+        Ok(())
+    }
+
+    fn set_cookies(&mut self, cookies: Option<String>) {
+        if let Some((_, auth)) = &mut self.auth {
+            auth.cookies = cookies;
+        }
+    }
+
+    /// Corps texte d'une réponse, tronqué à la limite de taille.
+    async fn read_text(&self, mut resp: reqwest::Response) -> Result<String, String> {
+        let mut buf = Vec::new();
+        while let Some(c) = resp.chunk().await.map_err(chain)? {
+            buf.extend_from_slice(&c);
+            if buf.len() >= self.max_body {
+                buf.truncate(self.max_body);
+                break;
+            }
+        }
+        Ok(String::from_utf8_lossy(&gunzip_if_needed(buf, self.max_body)).into_owned())
+    }
+
+    /// Le formulaire de connexion est-il utilisé ? (liens de déconnexion à éviter)
+    pub fn logged_in(&self) -> bool {
+        self.auth.as_ref().is_some_and(|(_, a)| a.form.is_some())
     }
 
     /// Les IP littérales ne passent pas par le résolveur : on les vérifie ici.

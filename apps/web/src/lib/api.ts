@@ -211,7 +211,7 @@ export interface RowsParams {
 /** Configuration d'audit d'un projet (voir `PUT /api/projects/{id}/config`). */
 export interface ExtractorDef {
   name: string
-  kind: 'regex' | 'css' | 'contains'
+  kind: 'regex' | 'css' | 'contains' | 'xpath'
   pattern: string
   attr: string | null
 }
@@ -237,12 +237,14 @@ export interface SiteAuthState {
   basic: boolean
   headers: number
   cookies: boolean
+  form: boolean
 }
 
 export interface SiteAuthBody {
   basic?: { user: string; password: string }
   headers: { name: string; value: string }[]
   cookies?: string
+  form?: { url: string; username: string; password: string; username_field?: string; password_field?: string }
 }
 
 export interface Schedule {
