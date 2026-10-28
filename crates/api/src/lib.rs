@@ -4,6 +4,7 @@
 //! serveur sur chaque audit, et le filtre SSRF du crawler reste actif (`allow_private` n'est
 //! jamais exposé).
 
+mod integrations;
 mod secrets;
 pub use secrets::SecretKey;
 
@@ -53,6 +54,8 @@ pub struct ApiConfig {
     pub trust_proxy: bool,
     /// Clé de chiffrement des identifiants des sites audités ; sans elle, la fonction est désactivée.
     pub secret_key: Option<SecretKey>,
+    /// Adresses des services Google des intégrations (modifiables pour les tests).
+    pub endpoints: integrations::Endpoints,
 }
 
 impl Default for ApiConfig {
@@ -68,6 +71,7 @@ impl Default for ApiConfig {
             static_dir: None,
             trust_proxy: false,
             secret_key: None,
+            endpoints: integrations::Endpoints::default(),
         }
     }
 }
@@ -341,6 +345,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/projects/{id}/auth",
             get(get_auth).put(put_auth).delete(delete_auth),
+        )
+        .route(
+            "/api/projects/{id}/integrations/keys",
+            get(get_integration_keys).put(put_integration_keys),
         )
         .route(
             "/api/projects/{id}/schedule",
@@ -668,6 +676,8 @@ struct ProjectConfig {
     extractors: Vec<ExtractorDef>,
     /// Vérifie les liens vers d'autres sites (requêtes vers des tiers, 500 URL au plus).
     check_external: bool,
+    /// Intégrations externes activées (PageSpeed, Search Console, GA4) ; leurs clés sont à part, chiffrées.
+    integrations: integrations::IntegrationsConfig,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -733,6 +743,7 @@ impl ProjectConfig {
             return Err("longueur d'URL maximale : entre 10 et 10 000".into());
         }
         callistseo_crawler::Scope::new(&self.scope())?;
+        self.integrations.validate()?;
         callistseo_crawler::Extractors::new(&self.core_extractors()?).map(drop)
     }
 
@@ -870,6 +881,290 @@ async fn project_auth(s: &AppState, project_id: i64) -> ApiResult<callistseo_cor
         .map_err(|e| ApiError::new(StatusCode::CONFLICT, e))
 }
 
+// ---- intégrations externes ---------------------------------------------------------------------
+
+/// Intégrations à lancer après un audit : configuration du projet et clés déchiffrées.
+struct IntegrationJob {
+    cfg: integrations::IntegrationsConfig,
+    secrets: Result<integrations::IntegrationSecrets, String>,
+}
+
+/// Ce que les intégrations savent d'une page de l'audit.
+struct PageInfo {
+    url: String,
+    indexable: bool,
+    has_query: bool,
+    path: String,
+}
+
+async fn integration_secrets(
+    s: &AppState,
+    project_id: i64,
+) -> Result<integrations::IntegrationSecrets, String> {
+    let blob = s
+        .db(move |st| st.integration_secret(project_id))
+        .await
+        .map_err(|e| e.1)?;
+    match (blob, &s.cfg.secret_key) {
+        (None, _) => Ok(Default::default()),
+        (Some(_), None) => Err(AUTH_DISABLED.into()),
+        (Some(b), Some(key)) => secrets::open(key, "integrations", project_id, &b),
+    }
+}
+
+/// Clés enregistrées : présence seulement, plus l'adresse du compte de service (à ajouter comme
+/// utilisateur dans Search Console et GA4 ; ce n'est pas un secret).
+async fn get_integration_keys(
+    State(s): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<Value>> {
+    if s.db(move |st| st.project(id)).await?.is_none() {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "projet introuvable"));
+    }
+    let keys = integration_secrets(&s, id).await;
+    let email = keys
+        .as_ref()
+        .ok()
+        .and_then(|k| k.service_account.as_deref())
+        .and_then(|j| integrations::ServiceAccount::parse(j).ok())
+        .map(|sa| sa.client_email);
+    Ok(Json(json!({
+        "available": s.cfg.secret_key.is_some(),
+        "readable": keys.is_ok(),
+        "psi_key": keys.as_ref().is_ok_and(|k| k.psi_key.is_some()),
+        "service_account": email,
+    })))
+}
+
+/// Remplace les clés fournies : champ absent = inchangé, chaîne vide = retirée.
+async fn put_integration_keys(
+    State(s): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<integrations::IntegrationSecrets>,
+) -> ApiResult<StatusCode> {
+    let Some(key) = s.cfg.secret_key.clone() else {
+        return Err(ApiError::new(StatusCode::CONFLICT, AUTH_DISABLED));
+    };
+    if s.db(move |st| st.project(id)).await?.is_none() {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "projet introuvable"));
+    }
+    // Clés illisibles (clé du serveur changée) : on repart de zéro plutôt que de bloquer.
+    let mut keys = integration_secrets(&s, id).await.unwrap_or_default();
+    if let Some(k) = body.psi_key {
+        let k = k.trim().to_owned();
+        if k.len() > 200 || !k.bytes().all(|b| b.is_ascii_graphic()) {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "clé PageSpeed invalide",
+            ));
+        }
+        keys.psi_key = (!k.is_empty()).then_some(k);
+    }
+    if let Some(sa) = body.service_account {
+        if sa.trim().is_empty() {
+            keys.service_account = None;
+        } else {
+            if sa.len() > 20_000 {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "fichier de compte de service trop gros",
+                ));
+            }
+            integrations::ServiceAccount::parse(&sa)
+                .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
+            keys.service_account = Some(sa);
+        }
+    }
+    let blob = (keys.psi_key.is_some() || keys.service_account.is_some())
+        .then(|| secrets::seal(&key, "integrations", id, &keys))
+        .transpose()
+        .map_err(ApiError::internal)?;
+    s.db(move |st| st.set_integration_secret(id, blob.as_deref()))
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Lance les intégrations configurées, enregistre leurs mesures, les problèmes qui en découlent et
+/// leur état (affiché dans l'audit). Une intégration en panne n'empêche pas les autres.
+async fn run_integrations(s: &AppState, run_id: i64, pages: Vec<PageInfo>, job: IntegrationJob) {
+    use integrations as ig;
+    let save_status = |status: Value| async move {
+        let json = status.to_string();
+        let _ = s.db(move |st| st.set_run_integrations(run_id, &json)).await;
+    };
+    save_status(json!({ "en_cours": true })).await;
+    let mut status = serde_json::Map::new();
+    let fail = |msg: &str| json!({ "erreur": msg });
+    let keys = match job.secrets {
+        Ok(k) => k,
+        Err(e) => {
+            for name in ["psi", "gsc", "ga4"] {
+                status.insert(name.into(), fail(&e));
+            }
+            return save_status(Value::Object(status)).await;
+        }
+    };
+    let http = match ig::http_client(&s.cfg.user_agent) {
+        Ok(h) => h,
+        Err(e) => return save_status(json!({ "erreur": e })).await,
+    };
+    let ep = &s.cfg.endpoints;
+    let mut psi: HashMap<String, callistseo_storage::PsiMetrics> = HashMap::new();
+    let mut gsc_ran = false;
+    let mut impressions: HashMap<String, i64> = HashMap::new();
+
+    if let Some(cfg) = &job.cfg.psi {
+        match &keys.psi_key {
+            None => {
+                status.insert(
+                    "psi".into(),
+                    fail(
+                        "clé d'API PageSpeed manquante (Google n'accepte plus les appels sans clé)",
+                    ),
+                );
+            }
+            Some(key) => {
+                // Échantillon : pages indexables, les moins profondes d'abord (l'accueil en tête).
+                let sample: Vec<String> = pages
+                    .iter()
+                    .filter(|p| p.indexable)
+                    .take(cfg.max_urls.min(ig::PSI_MAX_URLS))
+                    .map(|p| p.url.clone())
+                    .collect();
+                let (mut ok, mut errors) = (Vec::new(), Vec::new());
+                // 4 mesures à la fois : chacune prend 10 à 30 s chez Google.
+                for chunk in sample.chunks(4) {
+                    let mut set = tokio::task::JoinSet::new();
+                    for url in chunk {
+                        let (http, ep, key, url, strategy) = (
+                            http.clone(),
+                            ep.clone(),
+                            key.clone(),
+                            url.clone(),
+                            cfg.strategy.clone(),
+                        );
+                        set.spawn(async move {
+                            let r = ig::psi_one(&http, &ep, &key, &url, &strategy).await;
+                            (url, r)
+                        });
+                    }
+                    while let Some(Ok((url, r))) = set.join_next().await {
+                        match r {
+                            Ok(m) => ok.push((url, m)),
+                            Err(e) => errors.push(e),
+                        }
+                    }
+                }
+                let n = ok.len();
+                psi.extend(ok.iter().cloned());
+                let _ = s.db(move |st| st.set_psi(run_id, &ok)).await;
+                let mut st = json!({ "pages": n, "echecs": errors.len() });
+                if let Some(e) = errors.first() {
+                    st["erreur"] = json!(e);
+                }
+                status.insert("psi".into(), st);
+            }
+        }
+    }
+
+    if job.cfg.gsc.is_some() || job.cfg.ga4.is_some() {
+        let sa = keys
+            .service_account
+            .as_deref()
+            .ok_or_else(|| "compte de service Google manquant".to_owned())
+            .and_then(ig::ServiceAccount::parse);
+        let now = now_secs();
+        if let Some(cfg) = &job.cfg.gsc {
+            // 28 jours se terminant il y a 3 jours (délai de Search Console).
+            let today = now.div_euclid(86_400);
+            let (start, end) = (ig::civil_date(today - 30), ig::civil_date(today - 3));
+            let rows = match &sa {
+                Ok(sa) => match ig::access_token(&http, ep, sa, ig::SCOPE_GSC, now).await {
+                    Ok(t) => ig::gsc_rows(&http, ep, &t, &cfg.property, (&start, &end)).await,
+                    Err(e) => Err(e),
+                },
+                Err(e) => Err(e.clone()),
+            };
+            match rows {
+                Ok(rows) => {
+                    let total = rows.len();
+                    let ours: std::collections::HashSet<&str> =
+                        pages.iter().map(|p| p.url.as_str()).collect();
+                    // Les URL de Google passent par la même normalisation que celles du crawl.
+                    let matched: Vec<(String, callistseo_storage::GscMetrics)> = rows
+                        .into_iter()
+                        .filter_map(|(u, m)| Some((normalize(&u, None)?.to_string(), m)))
+                        .filter(|(u, _)| ours.contains(u.as_str()))
+                        .collect();
+                    gsc_ran = true;
+                    impressions.extend(matched.iter().map(|(u, m)| (u.clone(), m.impressions)));
+                    let n = matched.len();
+                    let _ = s.db(move |st| st.set_gsc(run_id, &matched)).await;
+                    status.insert(
+                        "gsc".into(),
+                        json!({ "pages": n, "lignes": total, "periode": format!("{start} → {end}") }),
+                    );
+                }
+                Err(e) => {
+                    status.insert("gsc".into(), fail(&e));
+                }
+            }
+        }
+        if let Some(cfg) = &job.cfg.ga4 {
+            let rows = match &sa {
+                Ok(sa) => match ig::access_token(&http, ep, sa, ig::SCOPE_GA4, now).await {
+                    Ok(t) => ig::ga4_rows(&http, ep, &t, &cfg.property_id).await,
+                    Err(e) => Err(e),
+                },
+                Err(e) => Err(e.clone()),
+            };
+            match rows {
+                Ok(rows) => {
+                    let total = rows.len();
+                    // `pagePath` n'a ni hôte ni paramètres : rattaché aux pages sans paramètres.
+                    let by_path: HashMap<&str, &callistseo_storage::Ga4Metrics> =
+                        rows.iter().map(|(p, m)| (p.as_str(), m)).collect();
+                    let matched: Vec<(String, callistseo_storage::Ga4Metrics)> = pages
+                        .iter()
+                        .filter(|p| !p.has_query)
+                        .filter_map(|p| {
+                            Some((p.url.clone(), (*by_path.get(p.path.as_str())?).clone()))
+                        })
+                        .collect();
+                    let n = matched.len();
+                    let _ = s.db(move |st| st.set_ga4(run_id, &matched)).await;
+                    status.insert("ga4".into(), json!({ "pages": n, "lignes": total }));
+                }
+                Err(e) => {
+                    status.insert("ga4".into(), fail(&e));
+                }
+            }
+        }
+    }
+
+    // Règles sur les mesures (Core Web Vitals, pages sans impression).
+    let measured: Vec<callistseo_seo_rules::Measured> = pages
+        .iter()
+        .filter_map(|p| {
+            let url = Url::parse(&p.url).ok()?;
+            let m = psi.get(&p.url);
+            Some(callistseo_seo_rules::Measured {
+                psi_score: m.and_then(|m| m.score),
+                lcp_ms: m.and_then(|m| m.lcp_ms),
+                cls: m.and_then(|m| m.cls),
+                inp_ms: m.and_then(|m| m.inp_ms),
+                gsc_impressions: gsc_ran.then(|| impressions.get(&p.url).copied().unwrap_or(0)),
+                ..callistseo_seo_rules::Measured::new(url, p.indexable)
+            })
+        })
+        .collect();
+    let issues = callistseo_seo_rules::external_issues(&measured);
+    if !issues.is_empty() {
+        let _ = s.db(move |st| st.add_issues(run_id, &issues)).await;
+    }
+    save_status(Value::Object(status)).await;
+}
+
 #[derive(Deserialize, Default)]
 struct CrawlRequest {
     /// Délai minimal entre deux requêtes (ms), borné par le serveur.
@@ -953,7 +1248,15 @@ async fn launch_crawl(s: &AppState, project_id: i64, req: CrawlRequest) -> ApiRe
     let run_cfg = cfg.clone();
     let run_id = s.db(move |st| st.create_run(project_id, &run_cfg)).await?;
 
-    spawn_crawl(s, run_id, start, cfg);
+    let job = if project_cfg.integrations.is_empty() {
+        None
+    } else {
+        Some(IntegrationJob {
+            cfg: project_cfg.integrations.clone(),
+            secrets: integration_secrets(s, project_id).await,
+        })
+    };
+    spawn_crawl(s, run_id, start, cfg, job);
     Ok(run_id)
 }
 
@@ -1075,7 +1378,13 @@ impl Scheduler {
 /// Lance l'audit en tâche de fond. Fonction synchrone : aucun verrou n'est tenu à travers un
 /// `await`, et le verrou de `running` reste pris jusqu'à l'insertion, donc la tâche (qui se retire
 /// elle-même à la fin) ne peut pas passer devant, même si elle termine instantanément.
-fn spawn_crawl(s: &AppState, run_id: i64, start: Url, cfg: CrawlConfig) {
+fn spawn_crawl(
+    s: &AppState,
+    run_id: i64,
+    start: Url,
+    cfg: CrawlConfig,
+    job: Option<IntegrationJob>,
+) {
     let stats = Arc::new(CrawlStats::default());
     let mut running = lock(&s.running);
     let task_state = s.clone();
@@ -1090,20 +1399,34 @@ fn spawn_crawl(s: &AppState, run_id: i64, start: Url, cfg: CrawlConfig) {
             Ok(mut pages) => {
                 pages.sort_by(|a, b| (a.depth, &a.url).cmp(&(b.depth, &b.url)));
                 let issues = analyze(&pages, &RulesConfig::default());
-                task_state
+                // Ce qu'il faut aux intégrations, avant que les pages partent en base.
+                let infos: Vec<PageInfo> = pages
+                    .iter()
+                    .map(|p| PageInfo {
+                        url: p.url.to_string(),
+                        indexable: callistseo_seo_rules::is_indexable(p),
+                        has_query: p.url.query().is_some(),
+                        path: p.url.path().to_owned(),
+                    })
+                    .collect();
+                let saved = task_state
                     .db(move |st| st.finish_run(run_id, &pages, &issues))
-                    .await
+                    .await;
+                saved.map(|()| Some(infos))
             }
             Err(e) => {
                 task_state
-                    .db(move |st| st.set_run_status(run_id, "failed", Some(&e)).map(drop))
+                    .db(move |st| st.set_run_status(run_id, "failed", Some(&e)).map(|_| None))
                     .await
             }
         };
-        if let Err(e) = outcome {
-            eprintln!("audit #{run_id}: résultat non enregistré ({})", e.1);
-        }
         lock(&task_state.running).remove(&run_id);
+        match (outcome, job) {
+            (Err(e), _) => eprintln!("audit #{run_id}: résultat non enregistré ({})", e.1),
+            // Après l'enregistrement : l'audit est consultable pendant que les intégrations tournent.
+            (Ok(Some(infos)), Some(job)) => run_integrations(&task_state, run_id, infos, job).await,
+            _ => {}
+        }
     });
     running.insert(run_id, (handle.abort_handle(), stats));
 }
@@ -2965,6 +3288,73 @@ mod tests {
         assert_eq!(st, StatusCode::NO_CONTENT);
         let (_, state) = json_call(&app, Method::GET, &uri, None).await;
         assert_eq!(state["configured"], json!(false));
+    }
+
+    #[tokio::test]
+    async fn integration_keys_are_write_only_encrypted_and_config_is_validated() {
+        let key = SecretKey::from_hex(&"c".repeat(64)).unwrap();
+        let (app, st8) = app_with(ApiConfig {
+            secret_key: Some(key),
+            ..ApiConfig::default()
+        });
+        let (st, p) = json_call(
+            &app,
+            Method::POST,
+            "/api/projects",
+            Some(json!({"name": "p", "start_url": "https://exemple.fr/"})),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CREATED, "{p}");
+        let id = p["id"].as_i64().unwrap();
+
+        // Écriture : clé PageSpeed et compte de service (le PEM de test du module d'intégrations).
+        let sa = json!({
+            "client_email": "robot@projet.iam.gserviceaccount.com",
+            "private_key": include_str!("../tests/fixtures/test-service-account-key.pem"),
+        })
+        .to_string();
+        let keys = format!("/api/projects/{id}/integrations/keys");
+        let body = json!({"psi_key": "AIza-cle-secrete", "service_account": sa});
+        let (st, _) = json_call(&app, Method::PUT, &keys, Some(body)).await;
+        assert_eq!(st, StatusCode::NO_CONTENT);
+
+        // Lecture : présence et adresse du compte seulement.
+        let (st, bytes) = call(&app, Method::GET, &keys, None, None).await;
+        let text = String::from_utf8_lossy(&bytes);
+        assert_eq!(st, StatusCode::OK);
+        for secret in ["AIza-cle-secrete", "PRIVATE KEY"] {
+            assert!(!text.contains(secret), "{secret} renvoyé : {text}");
+        }
+        let state: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            (state["psi_key"].clone(), state["service_account"].clone()),
+            (json!(true), json!("robot@projet.iam.gserviceaccount.com"))
+        );
+
+        // En base : chiffré.
+        let blob = st8
+            .db(move |st| st.integration_secret(id))
+            .await
+            .ok()
+            .flatten()
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&blob).contains("AIza-cle-secrete"));
+
+        // Compte de service invalide refusé.
+        let (st, _) = json_call(
+            &app,
+            Method::PUT,
+            &keys,
+            Some(json!({"service_account": "{}"})),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+
+        // Configuration d'intégration invalide refusée (propriété Search Console sans barre finale).
+        let cfg = format!("/api/projects/{id}/config");
+        let bad = json!({"integrations": {"gsc": {"property": "https://exemple.fr"}}});
+        let (st, _) = json_call(&app, Method::PUT, &cfg, Some(bad)).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

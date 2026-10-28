@@ -1,9 +1,11 @@
 //! Règles SEO : fonctions pures sur les pages crawlées (ni réseau, ni base de données).
 //! Chaque règle constate un fait ; les seuils éditoriaux sont dans `RulesConfig`.
 
+mod external;
 mod extra;
 mod info;
 
+pub use external::{external_issues, Measured};
 pub use info::{rule_info, RuleInfo, RULES};
 
 use callistseo_core::{CrawledPage, Issue, ROBOTS_BLOCKED};
