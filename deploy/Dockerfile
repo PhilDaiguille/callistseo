@@ -2,7 +2,7 @@
 # Image unique : le serveur CallistSEO (API + interface web). Contexte de build : la racine du dépôt.
 
 # --- 1. Interface web -------------------------------------------------------------------------
-FROM node:24-slim AS web
+FROM node:26-slim AS web
 RUN npm install -g pnpm@12
 WORKDIR /src
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
