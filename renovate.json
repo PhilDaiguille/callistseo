@@ -1,6 +1,40 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "CallistSEO : Cargo (workspace + desktop Tauri), pnpm (interface + desktop), GitHub Actions, images Docker (deploy/).",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    ":semanticCommitsDisabled"
+  ],
+  "timezone": "Europe/Paris",
+  "schedule": [
+    "* */2 * * *"
+  ],
+  "labels": [
+    "dépendances"
+  ],
+  "minimumReleaseAge": "3 days",
+  "platformAutomerge": false,
+  "packageRules": [
+    {
+      "description": "Mineures et correctifs, tous écosystèmes : une seule PR, fusionnée seule une fois la CI verte.",
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest"
+      ],
+      "groupName": "dépendances (mineures et correctifs)",
+      "groupSlug": "non-majeures",
+      "automerge": true
+    },
+    {
+      "description": "Majeures : une seule PR, à relire et fusionner à la main.",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "groupName": "dépendances (majeures)",
+      "groupSlug": "majeures",
+      "automerge": false
+    }
   ]
 }
