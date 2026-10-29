@@ -18,6 +18,12 @@ fn db(e: rusqlite::Error) -> String {
     e.to_string()
 }
 
+/// Score de santé d'un audit : part (arrondie) des URL sans problème « Erreur ».
+fn health_score(status: &str, pages: i64, error_pages: i64) -> Option<i64> {
+    (status == "done" && pages > 0)
+        .then(|| ((pages - error_pages) as f64 * 100.0 / pages as f64).round() as i64)
+}
+
 /// Migrations versionnées via `PRAGMA user_version` : on n'ajoute qu'à la fin de la liste.
 const MIGRATIONS: &[&str] = &[
     "
@@ -244,6 +250,9 @@ pub struct RunInfo {
     pub pages: i64,
     pub errors: i64,
     pub warnings: i64,
+    /// Score de santé (0-100) : part des URL sans problème « Erreur ». `None` si l'audit n'est
+    /// pas terminé ou n'a aucune page.
+    pub health: Option<i64>,
     /// État des intégrations externes de l'audit (JSON), `None` si aucune n'a tourné.
     pub integrations: Option<String>,
 }
@@ -981,7 +990,8 @@ impl Store {
                     (SELECT COUNT(*) FROM pages WHERE run_id = r.id),
                     (SELECT COUNT(*) FROM issues WHERE run_id = r.id AND severity = 'Error'),
                     (SELECT COUNT(*) FROM issues WHERE run_id = r.id AND severity = 'Warning'),
-                    r.integrations
+                    r.integrations,
+                    (SELECT COUNT(DISTINCT url) FROM issues WHERE run_id = r.id AND severity = 'Error')
                  FROM crawl_runs r JOIN projects p ON p.id = r.project_id
                  WHERE (?1 IS NULL OR r.project_id = ?1) AND (?2 IS NULL OR r.id = ?2)
                  ORDER BY r.id DESC",
@@ -989,16 +999,18 @@ impl Store {
             .map_err(db)?;
         let rows = stmt
             .query_map(params![project, run], |r| {
+                let (status, pages): (String, i64) = (r.get(4)?, r.get(8)?);
                 Ok(RunInfo {
+                    health: health_score(&status, pages, r.get(12)?),
                     id: r.get(0)?,
                     project_id: r.get(1)?,
                     project: r.get(2)?,
                     start_url: r.get(3)?,
-                    status: r.get(4)?,
+                    status,
                     started_at: r.get(5)?,
                     finished_at: r.get(6)?,
                     error: r.get(7)?,
-                    pages: r.get(8)?,
+                    pages,
                     errors: r.get(9)?,
                     warnings: r.get(10)?,
                     integrations: r.get(11)?,
@@ -1650,6 +1662,14 @@ fn intern(s: String) -> &'static str {
 mod tests {
     use super::*;
 
+    #[test]
+    fn health_score_only_for_finished_runs_with_pages() {
+        assert_eq!(health_score("done", 3, 1), Some(67));
+        assert_eq!(health_score("done", 4, 0), Some(100));
+        assert_eq!(health_score("done", 0, 0), None);
+        assert_eq!(health_score("running", 4, 0), None);
+    }
+
     fn u(p: &str) -> Url {
         Url::parse(&format!("http://a.test{p}")).unwrap()
     }
@@ -1735,6 +1755,7 @@ mod tests {
             [second, first]
         );
         assert_eq!((runs[1].pages, runs[1].errors, runs[1].warnings), (2, 1, 0));
+        assert_eq!(runs[1].health, Some(50));
         assert_eq!((runs[1].status.as_str(), runs[0].pages), ("done", 1));
         assert!(store.load_run(999).is_err());
     }

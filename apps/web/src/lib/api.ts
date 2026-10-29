@@ -25,6 +25,8 @@ export interface Crawl {
   pages: number
   errors: number
   warnings: number
+  /** Score de santé (0-100) : part des URL sans erreur. `null` tant que l'audit n'est pas terminé. */
+  health: number | null
   /** Présent seulement pendant l'exécution. */
   live?: LiveStats
 }

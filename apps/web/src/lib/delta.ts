@@ -15,6 +15,11 @@ export function previousDone(current: Crawl, crawls: Crawl[]): Crawl | null {
   )
 }
 
+/** Écart de score de santé avec l'audit précédent (`null` si l'un des deux n'a pas de score). */
+export function healthDelta(current: Crawl, previous: Crawl | null): number | null {
+  return current.health === null || previous?.health == null ? null : current.health - previous.health
+}
+
 const plural = (n: number, one: string, many: string) => (Math.abs(n) > 1 ? many : one)
 
 /** « +3 erreurs depuis l'audit #2 » : l'évolution des erreurs, ce qui compte pour une CI. */

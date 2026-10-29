@@ -64,7 +64,7 @@ cargo run -p callistseo-cli -- serve --db audits.db   # API sur 127.0.0.1:8080
 pnpm install && pnpm web:dev                          # interface sur http://127.0.0.1:5173 (proxy /api -> 8080)
 ```
 
-Projets, lancement et suivi d'audits, explorateur d'URL (recherche, filtre de statut, détail), centre de problèmes par règle, exports.
+Projets, lancement et suivi d'audits, tableau de bord (score de santé 0-100 = part des URL sans erreur, évolution d'un audit à l'autre, répartition par gravité), explorateur d'URL (recherche, filtre de statut, détail), centre de problèmes par règle, exports.
 
 ### Accès d'équipe
 

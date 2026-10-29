@@ -29,7 +29,7 @@ export function UpdateBanner() {
   }
 
   return (
-    <div role="status" className="flex flex-wrap items-center gap-3 border-b-2 border-ink bg-accent px-4 py-2 text-sm">
+    <div role="status" className="flex flex-wrap items-center gap-3 border-b border-line bg-accent px-4 py-2 text-sm">
       <span>
         Version {update.version} disponible{failed ? ' : l’installation a échoué, réessayez.' : '.'}
       </span>

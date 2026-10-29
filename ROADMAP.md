@@ -1,7 +1,7 @@
 # CallistSEO — Roadmap
 
 Document de suivi, mis à jour à chaque jalon. Légende : ✅ fait · 🟡 partiel · ⬜ à faire · ⏸ reporté.
-Dernière mise à jour : 28 oct. 2026.
+Dernière mise à jour : 29 oct. 2026.
 
 ## En un coup d'œil
 
@@ -14,7 +14,7 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 | Stockage et historique | ✅ | SQLite, migrations v1→v14, comparaison d'audits |
 | API | ✅ | projets, audits, rapports, segments, planification, configuration |
 | MCP (assistants IA) | ✅ | `callistseo mcp` : 13 outils ; reste : transport HTTP, ressources |
-| Interface web | ✅ | poste de travail, palette ⌘K, thème clair/sombre, mobile |
+| Interface web | ✅ | poste de travail, palette ⌘K, thème clair/sombre, mobile, tableau de bord (score de santé, tendance, gravités), barre latérale |
 | Desktop (Tauri) | 🟡 | fonctionne en processus ; release sur tag `v*` ; reste : essais Windows/Linux, signature |
 | Docker / web | 🟡 | image durcie et publiée (ghcr), HTTPS par Caddy, CSP, limite de connexion, journal d'accès ; reste : comptes |
 | Site vitrine | ✅ | `site/index.html` autonome ; reste : domaine et publication |
@@ -44,7 +44,7 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 ### Priorité 3 — différenciation
 
 11. **Intégrations** (désactivées par défaut, vos clés) : écran de consentement (ce qui part chez qui), clés chiffrées, quotas et plafonds de coût. **PageSpeed Insights** (Core Web Vitals), puis **Search Console et GA4** (compte de service), puis **OpenAI / Gemini** sur échantillon avec plafond.
-12. **Visualisations** : arborescence des dossiers, graphe de liens plafonné (~3 000 nœuds).
+12. 🟡 **Visualisations** : ~~score de santé, courbe de tendance, répartition par gravité~~ faits (Recharts chargé à la demande). Reste : score par catégorie, arborescence des dossiers, graphe de liens plafonné (~3 000 nœuds).
 13. **Règles à faible coût** : `data-nosnippet`, `llms.txt` (informatif), cohérence schéma / texte visible. ~~XPath pour l'extraction personnalisée~~ fait (`xpath`, via `skyscraper`).
 14. **MCP** : transport HTTP et ressources MCP.
 15. **Interface** : audit d'accessibilité (clavier, lecteur d'écran), tests de composants, synchronisation automatique `info.rs` ↔ `rules.ts` (test ou génération).

@@ -8,8 +8,10 @@
 
 /* ------------------------------------------------------------------------------------------
    Système de design CallistSEO — voir docs/design.md
-   Hiérarchie : FORT (contour encre 2 px + ombre décalée) pour les actions et champs ;
+   Hiérarchie : FORT (ombre douce, fond d'accent) pour les actions et cartes mises en avant ;
    LÉGER (contour fin `--line`) pour les panneaux, tableaux et badges ; NEUTRE (aucun contour).
+   Données : `--score-*` (remplissages pastel de la jauge et des gravités, chiffre toujours écrit
+   à côté) et `--chart-info` (courbe de tendance).
    ------------------------------------------------------------------------------------------ */
 
 @theme inline {
@@ -43,9 +45,13 @@
     --color-warning-soft: var(--warning-soft);
     --color-info-soft: var(--info-soft);
     --color-destructive-soft: var(--destructive-soft);
+    --color-score-good: var(--score-good);
+    --color-score-mid: var(--score-mid);
+    --color-score-bad: var(--score-bad);
+    --color-chart-info: var(--chart-info);
 
-    --shadow-pop: 3px 3px 0 0 var(--shadow-color);
-    --shadow-pop-sm: 2px 2px 0 0 var(--shadow-color);
+    --shadow-pop: 0 1px 2px color-mix(in oklab, var(--shadow-color) 8%, transparent), 0 8px 24px -6px color-mix(in oklab, var(--shadow-color) 16%, transparent);
+    --shadow-pop-sm: 0 1px 2px color-mix(in oklab, var(--shadow-color) 8%, transparent), 0 4px 12px -4px color-mix(in oklab, var(--shadow-color) 14%, transparent);
 
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
@@ -75,7 +81,7 @@
     --accent-foreground: #1D1C19;
     --destructive: #B3261E;
     --border: var(--line);
-    --input: #1D1C19;
+    --input: #8C8576;             /* contour des champs : 3:1 sur la carte (WCAG 1.4.11) */
     --ring: #6E7BD0;
 
     --ink: #1D1C19;               /* contour fort */
@@ -86,6 +92,13 @@
     --warning-soft: #F7E7BC;
     --info-soft: #E8E5F2;
     --destructive-soft: #F9DCD8;
+
+    /* Données : remplissages pastel (seuils du score ≥ 80, 50-79, < 50 ; gravités erreur,
+       avertissement). Décoratifs : la valeur est toujours écrite en clair à côté. */
+    --score-good: #83A58B;
+    --score-mid: #EBC66E;
+    --score-bad: #EE9A90;
+    --chart-info: #6E7BD0;
 }
 
 .dark {
@@ -105,17 +118,22 @@
     --accent-foreground: #F3EFE4;
     --destructive: #FF8A80;
     --border: var(--line);
-    --input: #EDE7D8;
+    --input: #7D776A;
     --ring: #C5CEEE;
 
     --ink: #EDE7D8;
     --line: rgb(243 239 228 / 0.16);
-    --shadow-color: #6F78A8;      /* une ombre noire serait invisible sur fond sombre */
+    --shadow-color: #000000;
     --success: #83A58B;
     --success-soft: #1F3A2A;
     --warning-soft: #4A3A12;
     --info-soft: #3A3650;
     --destructive-soft: #4A1F1C;
+
+    --score-good: #83A58B;
+    --score-mid: #D6B35E;
+    --score-bad: #E0857B;
+    --chart-info: #C5CEEE;
 }
 
 @layer base {
@@ -124,9 +142,6 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
-    /* Petits points discrets : de la profondeur sans distraire (les panneaux restent unis). */
-    background-image: radial-gradient(color-mix(in oklab, var(--foreground) 9%, transparent) 1px, transparent 1px);
-    background-size: 18px 18px;
   }
   html {
     @apply font-sans;
@@ -155,13 +170,13 @@
   .table-panel {
     @apply overflow-hidden rounded-2xl border border-line bg-card text-card-foreground;
   }
-  /* Niveau FORT : cartes mises en avant (ex. projets). */
+  /* Niveau FORT : cartes mises en avant (ex. projets, indicateurs). */
   .panel-pop {
-    @apply rounded-2xl border-2 border-ink bg-card text-card-foreground shadow-pop-sm;
+    @apply rounded-2xl border border-line bg-card text-card-foreground shadow-pop-sm;
   }
   /* Champs natifs (<select>) alignés sur le composant Input. */
   .field {
-    @apply h-10 rounded-xl border-2 border-ink bg-card px-3 text-sm text-foreground;
+    @apply h-10 rounded-xl border border-input bg-card px-3 text-sm text-foreground;
   }
 }
 

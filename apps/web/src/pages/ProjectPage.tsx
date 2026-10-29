@@ -15,7 +15,9 @@ import { Label } from '@/components/ui/label'
 import { PageSkeleton } from '@/components/Skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { HealthGauge, ScorePill, TrendChart } from '@/components/charts'
 import { api } from '@/lib/api'
+import { SCORE_LABEL, scoreLevel, trendPoints } from '@/lib/score'
 import { formatDate, formatDuration } from '@/lib/format'
 import { useDocumentTitle } from '@/lib/title'
 import { useQueryParams } from '@/lib/useQueryParams'
@@ -44,14 +46,14 @@ export function ProjectPage() {
   if (project.error) return <QueryError error={project.error} />
   if (!project.data) return <PageSkeleton />
   const p = project.data
+  const points = trendPoints(p.crawls)
+  // Dernier audit terminé avec un score (la liste est triée du plus récent au plus ancien).
+  const latest = p.crawls.find((c): c is typeof c & { health: number } => c.health !== null)
 
   return (
     <div className="grid gap-6">
       <div>
-        <Link to="/" className="text-sm text-muted-foreground hover:text-foreground">
-          ← Projets
-        </Link>
-        <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-3xl font-extrabold tracking-tight">{p.name}</h1>
             <p className="break-all text-sm text-muted-foreground">{p.start_url}</p>
@@ -60,7 +62,8 @@ export function ProjectPage() {
         </div>
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => update({ tab: v === 'audits' ? null : String(v) })}>
+      {/* Sur grand écran, la barre latérale porte déjà ces onglets. */}
+      <Tabs className="lg:hidden" value={tab} onValueChange={(v) => update({ tab: v === 'audits' ? null : String(v) })}>
         <TabsList>
           <TabsTrigger value="audits">Audits</TabsTrigger>
           <TabsTrigger value="schedule">Planification</TabsTrigger>
@@ -75,6 +78,28 @@ export function ProjectPage() {
           <SiteAuthCard projectId={id} />
           <IntegrationsCard projectId={id} />
         </div>
+      )}
+
+      {tab === 'audits' && latest && (
+        <section className="panel-pop grid gap-4 p-4 md:grid-cols-[auto_minmax(0,1fr)] md:items-center" aria-label="Santé du site">
+          <div className="flex items-center gap-4">
+            <HealthGauge score={latest.health} />
+            <div>
+              <p className="text-xs font-medium text-muted-foreground">Score de santé</p>
+              <p className="font-heading text-xl font-extrabold">{SCORE_LABEL[scoreLevel(latest.health)]}</p>
+              <p className="text-xs text-muted-foreground">
+                <Link to={`/crawls/${latest.id}`} className="underline underline-offset-4 hover:no-underline">
+                  Audit #{latest.id}
+                </Link>{' '}
+                · {latest.errors.toLocaleString('fr-FR')} erreurs · {latest.pages.toLocaleString('fr-FR')} URL
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-1">
+            <h2 className="text-sm font-semibold">Évolution du score</h2>
+            <TrendChart points={points} />
+          </div>
+        </section>
       )}
 
       {tab === 'audits' && (
@@ -129,6 +154,7 @@ export function ProjectPage() {
                   <TableHead>Statut</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead>Durée</TableHead>
+                  <TableHead>Score</TableHead>
                   <TableHead className="text-right">URL</TableHead>
                   <TableHead className="text-right">Erreurs</TableHead>
                   <TableHead className="text-right">Avertissements</TableHead>
@@ -147,6 +173,7 @@ export function ProjectPage() {
                     </TableCell>
                     <TableCell>{formatDate(c.started_at)}</TableCell>
                     <TableCell>{formatDuration(c.started_at, c.finished_at)}</TableCell>
+                    <TableCell>{c.health !== null ? <ScorePill score={c.health} /> : <span className="text-muted-foreground">—</span>}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.pages.toLocaleString('fr-FR')}</TableCell>
                     <TableCell className={`text-right tabular-nums ${c.errors > 0 ? 'font-semibold text-destructive' : ''}`}>{c.errors}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.warnings.toLocaleString('fr-FR')}</TableCell>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Columns3 } from 'lucide-react'
 import { SeverityBadge } from '@/components/Badges'
+import { SeverityBar } from '@/components/charts'
 import { EmptyState } from '@/components/EmptyState'
 import { QueryError } from '@/components/QueryError'
 import { SearchInput } from '@/components/SearchInput'
@@ -13,6 +14,7 @@ import { SegmentBar } from '@/components/workstation/SegmentBar'
 import { ReportSidebar } from '@/components/workstation/ReportSidebar'
 import { api, downloadExport, downloadSitemap } from '@/lib/api'
 import { ruleInfo } from '@/lib/rules'
+import { severityTotals } from '@/lib/score'
 import { loadColumns, pickColumns, saveColumns } from '@/lib/table'
 import { useQueryParams } from '@/lib/useQueryParams'
 
@@ -124,7 +126,7 @@ export function Workstation({
                 <SearchInput className="max-w-md" value={search} onChange={(v) => update({ q: v || null, sel: null })} placeholder="Filtrer par URL ou title…" />
               </div>
               <details className="relative">
-                <summary className="inline-flex h-8 cursor-pointer list-none items-center gap-1.5 rounded-lg border-2 border-ink bg-card px-3 text-[0.8rem] font-semibold">
+                <summary className="inline-flex h-8 cursor-pointer list-none items-center gap-1.5 rounded-lg border border-line bg-card px-3 shadow-pop-sm text-[0.8rem] font-semibold">
                   <Columns3 className="size-3.5" aria-hidden /> Colonnes
                 </summary>
                 <div className="panel-pop absolute right-0 z-20 mt-1 max-h-80 w-56 overflow-auto p-2">
@@ -162,29 +164,41 @@ export function Workstation({
   )
 }
 
-/** Accueil : les problèmes triés par gravité puis par nombre d'URL, avec l'explication et un lien direct. */
+/** Accueil : répartition par gravité, puis les problèmes triés par gravité et nombre d'URL. */
 function Overview({ data, onOpen }: { data: import('@/lib/api').ReportsResponse; onOpen: (id: string) => void }) {
   if (data.issues.length === 0) {
     return <EmptyState mood="happy">Aucun problème détecté sur cet audit. Bravo !</EmptyState>
   }
   return (
-    <div className="grid gap-2 overflow-auto lg:pr-1">
-      <h2 className="text-lg font-bold">À corriger en premier</h2>
-      <p className="text-sm text-muted-foreground">Triés par gravité, puis par nombre d’URL concernées.</p>
-      <ul className="grid gap-2">
-        {data.issues.map((i) => (
-          <li key={i.id}>
-            <button type="button" onClick={() => onOpen(i.id)} className="panel w-full px-3 py-2 text-left transition-colors hover:bg-accent">
-              <div className="flex flex-wrap items-center gap-2">
-                <SeverityBadge severity={i.severity} />
-                <span className="font-semibold">{i.label}</span>
-                <span className="ml-auto tabular-nums text-sm">{i.count.toLocaleString('fr-FR')} URL</span>
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">{ruleInfo(i.rule).help}</p>
-            </button>
-          </li>
-        ))}
-      </ul>
+    <div className="grid content-start gap-3 overflow-auto lg:pr-1">
+      <section className="panel grid gap-2 px-4 py-3" aria-labelledby="repartition">
+        <h2 id="repartition" className="text-sm font-semibold">
+          URL concernées par gravité
+        </h2>
+        <SeverityBar totals={severityTotals(data.issues)} />
+      </section>
+      <section className="grid gap-2" aria-labelledby="a-corriger">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="a-corriger" className="text-lg font-bold">
+            À corriger en premier
+          </h2>
+          <p className="text-xs text-muted-foreground">Triés par gravité, puis par nombre d’URL concernées.</p>
+        </div>
+        <ul className="table-panel divide-y divide-line">
+          {data.issues.map((i) => (
+            <li key={i.id}>
+              <button type="button" onClick={() => onOpen(i.id)} className="grid w-full gap-0.5 px-4 py-2.5 text-left transition-colors hover:bg-accent">
+                <div className="flex flex-wrap items-center gap-2">
+                  <SeverityBadge severity={i.severity} />
+                  <span className="font-semibold">{i.label}</span>
+                  <span className="ml-auto text-sm font-semibold tabular-nums">{i.count.toLocaleString('fr-FR')} URL</span>
+                </div>
+                <p className="text-xs text-muted-foreground">{ruleInfo(i.rule).help}</p>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   )
 }

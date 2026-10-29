@@ -6,7 +6,8 @@ import { EmptyState } from '@/components/EmptyState'
 import { PageSkeleton } from '@/components/Skeleton'
 import { QueryError } from '@/components/QueryError'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { HealthGauge } from '@/components/charts'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { api } from '@/lib/api'
@@ -87,10 +88,15 @@ export function ProjectsPage() {
           return (
             <li key={p.id}>
               <Link to={`/projects/${p.id}`} className="block h-full rounded-2xl">
-                <Card variant="pop" className="h-full transition-transform hover:-translate-y-0.5 hover:bg-accent/40 motion-reduce:transition-none">
+                <Card variant="pop" className="h-full transition-transform hover:-translate-y-0.5 hover:shadow-pop motion-reduce:transition-none">
                   <CardHeader>
                     <CardTitle>{p.name}</CardTitle>
                     <CardDescription className="break-all">{p.start_url}</CardDescription>
+                    {last?.health != null && (
+                      <CardAction>
+                        <HealthGauge score={last.health} size={56} />
+                      </CardAction>
+                    )}
                   </CardHeader>
                   <CardContent className="grid gap-2 text-sm">
                     {last ? (

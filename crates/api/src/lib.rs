@@ -639,7 +639,7 @@ fn run_json(r: &RunInfo, live: Option<&CrawlStats>) -> Value {
         "id": r.id, "project_id": r.project_id, "project": r.project, "start_url": r.start_url,
         "status": r.status, "started_at": r.started_at, "finished_at": r.finished_at,
         "error": r.error, "pages": pages,
-        "errors": r.errors, "warnings": r.warnings,
+        "errors": r.errors, "warnings": r.warnings, "health": r.health,
     });
     if let Some(l) = live {
         out["live"] = json!({

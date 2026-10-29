@@ -39,6 +39,12 @@ const PAIRS: [string, string][] = [
   ['destructive', 'background'], // message d'erreur
 ]
 
+// [élément, fond] hors texte (contours de champs, séries de graphiques) : 3:1 (WCAG 1.4.11).
+const NON_TEXT: [string, string][] = [
+  ['input', 'card'],
+  ['chart-info', 'card'],
+]
+
 describe('palette contrast (WCAG AA)', () => {
   it('computes known ratios correctly', () => {
     expect(contrast('#000000', '#ffffff')).toBeCloseTo(21, 0)
@@ -49,7 +55,7 @@ describe('palette contrast (WCAG AA)', () => {
     ['light', ':root'],
     ['dark', '.dark'],
   ] as const) {
-    it(`${name} theme: every text/background pair reaches 4.5:1`, () => {
+    it(`${name} theme: text pairs reach 4.5:1, borders and series 3:1`, () => {
       const t = tokens(selector)
       const low: string[] = []
       for (const [fg, bg] of PAIRS) {
@@ -57,6 +63,10 @@ describe('palette contrast (WCAG AA)', () => {
         expect(t[bg], `${bg} manquant dans ${selector}`).toBeTruthy()
         const ratio = contrast(t[fg], t[bg])
         if (ratio < 4.5) low.push(`${fg} sur ${bg} : ${ratio.toFixed(2)}`)
+      }
+      for (const [fg, bg] of NON_TEXT) {
+        const ratio = contrast(t[fg], t[bg])
+        if (ratio < 3) low.push(`${fg} sur ${bg} : ${ratio.toFixed(2)}`)
       }
       expect(low, `contrastes insuffisants (${name})`).toEqual([])
     })
