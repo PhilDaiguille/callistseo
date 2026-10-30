@@ -431,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "callistseo-api"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aes-gcm",
  "axum",
@@ -454,7 +454,7 @@ dependencies = [
 
 [[package]]
 name = "callistseo-audit-diff"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "callistseo-core",
  "url",
@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "callistseo-bench"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "callistseo-core",
  "callistseo-crawler",
@@ -476,7 +476,7 @@ dependencies = [
 
 [[package]]
 name = "callistseo-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "callistseo-api",
  "callistseo-audit-diff",
@@ -496,14 +496,14 @@ dependencies = [
 
 [[package]]
 name = "callistseo-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "url",
 ]
 
 [[package]]
 name = "callistseo-crawler"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "callistseo-core",
  "callistseo-seo-rules",
@@ -519,7 +519,7 @@ dependencies = [
 
 [[package]]
 name = "callistseo-desktop"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "callistseo-api",
  "callistseo-storage",
@@ -534,7 +534,7 @@ dependencies = [
 
 [[package]]
 name = "callistseo-export"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "callistseo-core",
  "callistseo-seo-rules",
@@ -544,7 +544,7 @@ dependencies = [
 
 [[package]]
 name = "callistseo-mcp"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "callistseo-api",
  "callistseo-core",
@@ -557,7 +557,7 @@ dependencies = [
 
 [[package]]
 name = "callistseo-seo-rules"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "callistseo-core",
  "serde_json",
@@ -566,7 +566,7 @@ dependencies = [
 
 [[package]]
 name = "callistseo-storage"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "callistseo-core",
  "rusqlite",
