@@ -639,7 +639,7 @@ fn run_json(r: &RunInfo, live: Option<&CrawlStats>) -> Value {
         "id": r.id, "project_id": r.project_id, "project": r.project, "start_url": r.start_url,
         "status": r.status, "started_at": r.started_at, "finished_at": r.finished_at,
         "error": r.error, "pages": pages,
-        "errors": r.errors, "warnings": r.warnings,
+        "errors": r.errors, "warnings": r.warnings, "health": r.health,
     });
     if let Some(l) = live {
         out["live"] = json!({
@@ -3499,7 +3499,7 @@ mod tests {
         };
         let (status, r) = get(format!("/api/crawls/{run}/reports")).await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(r["groups"][0]["label"], "Vue d'ensemble");
+        assert_eq!(r["groups"][0]["label"], "Ensemble du site");
         assert_eq!(r["groups"][0]["reports"][0]["id"], "all");
         assert_eq!(r["groups"][0]["reports"][0]["count"], 3);
         assert_eq!(r["issues"][0]["id"], "issue:http-error");

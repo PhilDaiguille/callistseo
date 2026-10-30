@@ -16,7 +16,7 @@ reqwest = { workspace = true, features = ["json"] }
 axum = "0.8.9"
 serde = { version = "1.0.229", features = ["derive"] }
 url.workspace = true
-callistseo-audit-diff = { version = "0.1.0", path = "../audit-diff" }
+callistseo-audit-diff = { version = "0.2.0", path = "../audit-diff" }
 tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.1", features = ["fs", "compression-gzip", "compression-br"] }
 aes-gcm = "0.11"

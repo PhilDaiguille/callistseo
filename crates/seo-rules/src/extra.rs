@@ -10,6 +10,29 @@ use url::Url;
 
 type Add<'a> = &'a mut dyn FnMut(&'static str, &Url, String);
 
+/// Part d'un HTML que lit Googlebot (2 Mo non compressés).
+const HTML_LIMIT: u64 = 2 * 1024 * 1024;
+
+/// Titre de page d'erreur, dans les formulations courantes (français, anglais).
+/// ponytail: heuristique sur le title et le H1, avec un plafond de mots ; pas d'analyse du corps.
+fn looks_like_not_found(text: &str) -> bool {
+    let t = text.to_lowercase().replace('’', "'");
+    t.split(|c: char| !c.is_alphanumeric()).any(|w| w == "404")
+        || [
+            "introuvable",
+            "non trouvée",
+            "not found",
+            "n'existe pas",
+            "n'existe plus",
+            "page inexistante",
+        ]
+        .iter()
+        .any(|p| t.contains(p))
+}
+
+/// Au-delà de ce nombre de mots, un title « 404 » est plus probablement un article (ex. « Peugeot 404 »).
+const SOFT_404_MAX_WORDS: u32 = 300;
+
 fn indexable(p: &CrawledPage) -> bool {
     p.is_html
         && p.status.is_some_and(|s| (200..300).contains(&s))
@@ -207,8 +230,135 @@ pub(crate) fn run(pages: &[CrawledPage], cfg: &RulesConfig, add: Add) {
                 "en-tête X-Robots-Tag noindex".into(),
             );
         }
+        if p.meta
+            .robots
+            .as_deref()
+            .is_some_and(|r| r.contains("nofollow"))
+            || f.header("x-robots-tag")
+                .is_some_and(|h| h.to_lowercase().contains("nofollow"))
+        {
+            add(
+                "nofollow-page",
+                &p.url,
+                "liens de la page non suivis (nofollow)".into(),
+            );
+        }
         if !ok {
             continue;
+        }
+
+        // Balises en double (audits v16 et plus).
+        let doubled: Vec<String> = [
+            (f.title_tags, "<title>"),
+            (f.description_tags, "meta description"),
+            (f.canonical_tags, "canonical"),
+        ]
+        .into_iter()
+        .filter_map(|(n, label)| n.filter(|n| *n > 1).map(|n| format!("{n} {label}")))
+        .collect();
+        if !doubled.is_empty() {
+            add("head-tags-duplicate", &p.url, doubled.join(", "));
+        }
+        if let Some(first) = f.blocked_resources.first() {
+            add(
+                "resource-blocked",
+                &p.url,
+                match f.blocked_resources.len() {
+                    1 => format!("ressource interdite à Googlebot : {first}"),
+                    n => format!("{n} ressources interdites à Googlebot, dont {first}"),
+                },
+            );
+        }
+        if let Some(n) = f.images_unsized.filter(|n| *n > 0) {
+            add(
+                "image-size-missing",
+                &p.url,
+                format!("{n} image(s) sans width/height"),
+            );
+        }
+        if p.depth == 0 && f.icon == Some(false) {
+            add(
+                "favicon-missing",
+                &p.url,
+                "aucun <link rel=\"icon\"> sur l'accueil".into(),
+            );
+        }
+        let error_title = p
+            .meta
+            .title
+            .iter()
+            .chain(p.meta.h1.first())
+            .find(|t| looks_like_not_found(t));
+        if let Some(t) =
+            error_title.filter(|_| f.word_count.is_some_and(|w| w <= SOFT_404_MAX_WORDS))
+        {
+            add("soft-404", &p.url, format!("statut 200, titre « {t} »"));
+        }
+
+        // Forme de l'URL (le chemin seul : l'hôte est insensible à la casse).
+        let len = p.url.as_str().chars().count();
+        if len > cfg.url_max {
+            add(
+                "url-too-long",
+                &p.url,
+                format!("{len} caractères (> {})", cfg.url_max),
+            );
+        }
+        let path = p.url.path();
+        if path.bytes().any(|b| b.is_ascii_uppercase()) {
+            add("url-uppercase", &p.url, format!("majuscules dans {path}"));
+        }
+        if path.contains('_') {
+            add("url-underscore", &p.url, format!("« _ » dans {path}"));
+        }
+        // Googlebot ne lit que les 2 premiers Mo d'un HTML (non compressé, doc Search Central).
+        if let Some(size) = f.size.filter(|s| *s > HTML_LIMIT) {
+            add(
+                "html-too-large",
+                &p.url,
+                format!("{:.1} Mo de HTML (> 2 Mo)", size as f64 / 1_048_576.0),
+            );
+        }
+        if !f.hreflang.is_empty() && !f.hreflang.iter().any(|(code, _)| code == "x-default") {
+            add(
+                "hreflang-x-default-missing",
+                &p.url,
+                format!("{} versions déclarées, aucune x-default", f.hreflang.len()),
+            );
+        }
+        if indexable(p) {
+            // `title_tags` marque un audit v16 : avant, les balises sociales n'étaient pas relevées.
+            if f.title_tags.is_some() {
+                let missing: Vec<&str> = ["og:title", "og:image"]
+                    .into_iter()
+                    .filter(|t| !f.social.iter().any(|s| s == t))
+                    .collect();
+                if !missing.is_empty() {
+                    add(
+                        "open-graph-missing",
+                        &p.url,
+                        format!("absent : {}", missing.join(", ")),
+                    );
+                }
+            }
+            if p.meta.canonical.is_none() {
+                add(
+                    "canonical-missing",
+                    &p.url,
+                    "aucune balise canonical".into(),
+                );
+            }
+            let internal = p
+                .links
+                .iter()
+                .any(|l| l.host_str() == p.url.host_str() && **l != p.url);
+            if !internal {
+                add(
+                    "dead-end-page",
+                    &p.url,
+                    "aucun lien vers une autre page du site".into(),
+                );
+            }
         }
 
         // Longueurs (en caractères, pas en pixels : approximation de l'affichage dans les résultats).

@@ -2,6 +2,12 @@ export function formatDate(secs: number): string {
   return new Date(secs * 1000).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
+/** « 29 oct. 2026 à 23:57 » : pour une phrase, là où `formatDate` met une virgule. */
+export function formatDateAt(secs: number): string {
+  const d = new Date(secs * 1000)
+  return `${d.toLocaleDateString('fr-FR', { dateStyle: 'medium' })} à ${d.toLocaleTimeString('fr-FR', { timeStyle: 'short' })}`
+}
+
 /** « 12 s », « 3 min 04 s » ; `end` absent = encore en cours (on compte jusqu'à `now`). */
 export function formatDuration(start: number, end: number | null, now = Date.now() / 1000): string {
   const total = Math.max(0, Math.round((end ?? now) - start))

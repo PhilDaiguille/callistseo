@@ -27,6 +27,8 @@ pub struct RulesConfig {
     pub min_words: usize,
     /// Délai (ms) jusqu'aux premiers octets au-delà duquel une réponse est jugée lente.
     pub slow_ms: u64,
+    /// Longueur d'URL (caractères) au-delà de laquelle on la juge trop longue.
+    pub url_max: usize,
 }
 
 impl Default for RulesConfig {
@@ -40,6 +42,7 @@ impl Default for RulesConfig {
             description_max: 160,
             min_words: 200,
             slow_ms: 1000,
+            url_max: 115,
         }
     }
 }
@@ -103,6 +106,12 @@ pub fn analyze(pages: &[CrawledPage], cfg: &RulesConfig) -> Vec<Issue> {
                     "redirect-chain",
                     &p.url,
                     format!("chaîne de {n} redirections"),
+                ),
+                // Une 302/303/307 annonce un retour de l'ancienne URL : rarement ce qu'on veut.
+                _ if matches!(s, 302 | 303 | 307) => add(
+                    "redirect-temporary",
+                    &p.url,
+                    format!("redirection temporaire {s}"),
                 ),
                 _ => add("redirect", &p.url, format!("redirection {s}")),
             },
@@ -170,15 +179,31 @@ pub fn analyze(pages: &[CrawledPage], cfg: &RulesConfig) -> Vec<Issue> {
             }
         }
 
-        // Liens internes cassés
+        // Liens internes cassés, ou qui passent par une redirection
+        let mut redirected: Vec<&Url> = Vec::new();
         for l in &p.links {
             if let Some(t) = by_url.get(&**l) {
                 // Une cible sans réponse (délai dépassé, réseau) n'est pas « cassée » : `network-error`
                 // la signale déjà une fois sur la page elle-même, au lieu d'une fois par lien qui y mène.
                 if t.status.is_some_and(|s| s >= 400) {
                     add("broken-link", &p.url, format!("lien cassé vers {l}"));
+                } else if t.status.is_some_and(|s| (300..400).contains(&s))
+                    && !redirected.contains(&&**l)
+                {
+                    redirected.push(l);
                 }
             }
+        }
+        // Un seul constat par page : un menu qui mène à une redirection ne doit pas noyer le rapport.
+        if let Some(first) = redirected.first() {
+            add(
+                "link-to-redirect",
+                &p.url,
+                match redirected.len() {
+                    1 => format!("lien vers une redirection : {first}"),
+                    n => format!("{n} liens vers des redirections, dont {first}"),
+                },
+            );
         }
     }
 
@@ -211,6 +236,12 @@ pub fn analyze(pages: &[CrawledPage], cfg: &RulesConfig) -> Vec<Issue> {
                         &p.url,
                         "URL du sitemap redirigée".into(),
                     );
+                } else if p.error.as_deref() == Some(ROBOTS_BLOCKED) {
+                    add(
+                        "sitemap-url-blocked",
+                        &p.url,
+                        "URL du sitemap interdite par robots.txt".into(),
+                    );
                 } else if is_noindex(p) {
                     add(
                         "sitemap-url-noindex",
@@ -236,11 +267,12 @@ pub fn analyze(pages: &[CrawledPage], cfg: &RulesConfig) -> Vec<Issue> {
 
     // Doublons (pages HTML 2xx indexables uniquement)
     type Key = fn(&CrawledPage) -> Option<String>;
-    let keys: [(&'static str, &str, Key); 2] = [
+    let keys: [(&'static str, &str, Key); 3] = [
         ("title-duplicate", "title", |p| p.meta.title.clone()),
         ("description-duplicate", "meta description", |p| {
             p.meta.description.clone()
         }),
+        ("h1-duplicate", "H1", |p| p.meta.h1.first().cloned()),
     ];
     for (rule, label, key) in keys {
         let mut groups: HashMap<String, Vec<&CrawledPage>> = HashMap::new();
@@ -333,7 +365,7 @@ mod tests {
                 description: Some(format!(
                     "Description de la page {path} écrite assez longuement pour dépasser le seuil minimal"
                 )),
-                h1: vec!["h".into()],
+                h1: vec![format!("h {path}")],
                 ..PageMeta::default()
             },
             url: u(path),
@@ -372,8 +404,13 @@ mod tests {
     fn rules(pages: &[CrawledPage]) -> Vec<(&'static str, String)> {
         analyze(pages, &RulesConfig::default())
             .into_iter()
-            // Les pages de test sont en HTTP : cette règle a son propre test.
-            .filter(|i| i.rule != "insecure-http")
+            // Les pages de test sont en HTTP, sans liens ni canonical : ces règles ont leur propre test.
+            .filter(|i| {
+                !matches!(
+                    i.rule,
+                    "insecure-http" | "dead-end-page" | "canonical-missing"
+                )
+            })
             .map(|i| (i.rule, i.url.path().to_owned()))
             .collect()
     }
@@ -598,7 +635,8 @@ mod tests {
         p.facts
             .headers
             .push(("x-robots-tag".into(), "NoIndex, nofollow".into()));
-        assert_eq!(only(p.clone()), ["noindex-header"]);
+        // « nofollow » dans le même en-tête a sa propre règle.
+        assert_eq!(only(p.clone()), ["nofollow-page", "noindex-header"]);
         // Il retire la page des doublons de title : deux pages au même title, l'une noindex par en-tête.
         let mut q = measured("/b");
         q.meta.title = p.meta.title.clone();
@@ -651,6 +689,13 @@ mod tests {
 
     #[test]
     fn hreflang_rules() {
+        // x-default a son propre test (`new_rules_on_existing_facts`).
+        let rules = |ps: &[CrawledPage]| -> Vec<_> {
+            rules(ps)
+                .into_iter()
+                .filter(|(r, _)| *r != "hreflang-x-default-missing")
+                .collect()
+        };
         let en = |p: &CrawledPage| ("en".to_owned(), p.url.to_string());
         let (mut fr, mut english) = (measured("/fr"), measured("/en"));
         let (fr_self, en_self) = (("fr".to_owned(), fr.url.to_string()), en(&english));
@@ -731,7 +776,11 @@ mod tests {
         http.url = u("/");
         let issues = analyze(&[http], &RulesConfig::default());
         assert_eq!(
-            issues.iter().map(|i| i.rule).collect::<Vec<_>>(),
+            issues
+                .iter()
+                .map(|i| i.rule)
+                .filter(|r| !matches!(*r, "canonical-missing" | "dead-end-page"))
+                .collect::<Vec<_>>(),
             ["insecure-http"]
         );
     }
@@ -866,5 +915,189 @@ mod tests {
         let mut p = measured("/e");
         p.facts.json_ld = vec![r#"{"@type":"NewsArticle","headline":"h","author":"x"}"#.into()];
         assert_eq!(ids(p), ["article-date-missing"]);
+    }
+
+    /// Règles calculées sur les données déjà collectées (lot A) : un cas qui déclenche, un qui ne
+    /// déclenche pas.
+    #[test]
+    fn new_rules_on_existing_facts() {
+        const NEW: &[&str] = &[
+            "redirect-temporary",
+            "link-to-redirect",
+            "canonical-missing",
+            "dead-end-page",
+            "h1-duplicate",
+            "url-too-long",
+            "url-uppercase",
+            "url-underscore",
+            "hreflang-x-default-missing",
+            "sitemap-url-blocked",
+            "html-too-large",
+        ];
+        let found = |pages: &[CrawledPage]| -> Vec<(&'static str, String)> {
+            analyze(pages, &RulesConfig::default())
+                .into_iter()
+                .filter(|i| NEW.contains(&i.rule))
+                .map(|i| (i.rule, i.url.path().to_owned()))
+                .collect()
+        };
+        let linked = |path: &str, to: &[&str]| {
+            let mut p = measured(path);
+            p.meta.canonical = Some(p.url.clone());
+            p.links = to
+                .iter()
+                .map(|t| Arc::new(Url::parse(&format!("https://a.test{t}")).unwrap()))
+                .collect();
+            p
+        };
+
+        // Site sain : canonicals, liens entre pages, H1 distincts, hreflang avec x-default.
+        let (mut a, b) = (linked("/a", &["/b"]), linked("/b", &["/a"]));
+        a.facts.hreflang = vec![
+            ("fr".into(), a.url.to_string()),
+            ("x-default".into(), a.url.to_string()),
+        ];
+        assert_eq!(found(&[a.clone(), b.clone()]), []);
+
+        // Redirections : 302 = temporaire (pas « redirect »), 301 reste « redirect » ; un seul constat
+        // par page même avec deux liens vers des redirections.
+        let mut tmp = linked("/tmp", &[]);
+        (tmp.status, tmp.is_html, tmp.redirect_to) = (Some(302), false, Some(b.url.clone()));
+        let mut moved = linked("/old", &[]);
+        (moved.status, moved.is_html, moved.redirect_to) = (Some(301), false, Some(b.url.clone()));
+        let src = linked("/src", &["/tmp", "/old", "/tmp", "/b"]);
+        let got = found(&[src, tmp, moved, b.clone()]);
+        // Tri de `analyze` : gravité (Avertissement avant Info), puis règle.
+        assert_eq!(
+            got,
+            [
+                ("redirect-temporary", "/tmp".to_owned()),
+                ("link-to-redirect", "/src".to_owned())
+            ]
+        );
+
+        // Page indexable sans canonical ni lien interne ; H1 partagé.
+        let mut alone = measured("/seule");
+        alone.links = vec![
+            Arc::new(Url::parse("https://autre.test/").unwrap()),
+            Arc::new(alone.url.clone()),
+        ];
+        let mut twin = linked("/jumelle", &["/seule"]);
+        twin.meta.h1 = alone.meta.h1.clone();
+        let got = found(&[alone, twin]);
+        assert_eq!(
+            got,
+            [
+                ("canonical-missing", "/seule".to_owned()),
+                ("dead-end-page", "/seule".to_owned()),
+                ("h1-duplicate", "/jumelle".to_owned()),
+                ("h1-duplicate", "/seule".to_owned()),
+            ]
+        );
+
+        // Forme de l'URL, hreflang sans x-default, HTML trop lourd.
+        let long = format!("/{}", "a".repeat(120));
+        let mut odd = linked("/Mon_Article", &["/b"]);
+        odd.facts.hreflang = vec![("fr".into(), odd.url.to_string())];
+        odd.facts.size = Some(3 * 1024 * 1024);
+        let got = found(&[odd, linked(&long, &["/b"]), b.clone()]);
+        assert_eq!(
+            got,
+            [
+                ("html-too-large", "/Mon_Article".to_owned()),
+                ("hreflang-x-default-missing", "/Mon_Article".to_owned()),
+                ("url-too-long", long.clone()),
+                ("url-underscore", "/Mon_Article".to_owned()),
+                ("url-uppercase", "/Mon_Article".to_owned()),
+            ]
+        );
+
+        // Sitemap : URL interdite par robots.txt.
+        let mut blocked = linked("/prive", &[]);
+        (
+            blocked.status,
+            blocked.is_html,
+            blocked.error,
+            blocked.in_sitemap,
+        ) = (None, false, Some(ROBOTS_BLOCKED.into()), true);
+        a.in_sitemap = true;
+        assert_eq!(
+            found(&[a, b, blocked]),
+            [("sitemap-url-blocked", "/prive".to_owned())]
+        );
+    }
+
+    /// Règles sur les faits du schéma v16 (lot B), et silence sur un audit plus ancien.
+    #[test]
+    fn head_social_image_icon_and_soft_404_rules() {
+        const NEW: &[&str] = &[
+            "head-tags-duplicate",
+            "open-graph-missing",
+            "image-size-missing",
+            "nofollow-page",
+            "favicon-missing",
+            "soft-404",
+            "resource-blocked",
+        ];
+        let found = |p: CrawledPage| -> Vec<&'static str> {
+            analyze(&[p], &RulesConfig::default())
+                .into_iter()
+                .map(|i| i.rule)
+                .filter(|r| NEW.contains(r))
+                .collect()
+        };
+        let v16 = |path: &str| {
+            let mut p = measured(path);
+            p.facts.title_tags = Some(1);
+            p.facts.description_tags = Some(1);
+            p.facts.canonical_tags = Some(1);
+            p.facts.images_unsized = Some(0);
+            p.facts.social = vec!["og:title".into(), "og:image".into()];
+            p.facts.icon = Some(true);
+            p
+        };
+        assert_eq!(found(v16("/")), Vec::<&str>::new(), "page saine");
+        // Audit d'avant la v16 : aucun fait, aucune règle (hors nofollow, lu dans meta robots).
+        assert_eq!(found(measured("/")), Vec::<&str>::new());
+
+        let mut p = v16("/");
+        p.facts.canonical_tags = Some(2);
+        p.facts.images_unsized = Some(3);
+        p.facts.social = vec!["og:title".into()];
+        p.facts.icon = Some(false);
+        p.meta.robots = Some("index, nofollow".into());
+        assert_eq!(
+            found(p),
+            [
+                "head-tags-duplicate",
+                "favicon-missing",
+                "image-size-missing",
+                "nofollow-page",
+                "open-graph-missing"
+            ]
+        );
+        // CSS / JS interdits à Googlebot (liste déjà filtrée par le crawler).
+        let mut blocked = v16("/r");
+        blocked.facts.blocked_resources = vec![
+            "https://a.test/assets/app.css".into(),
+            "https://a.test/assets/app.js".into(),
+        ];
+        assert_eq!(found(blocked), ["resource-blocked"]);
+        // L'icône ne compte que sur l'accueil (profondeur 0).
+        let mut deep = v16("/a");
+        (deep.depth, deep.facts.icon) = (1, Some(false));
+        assert_eq!(found(deep), Vec::<&str>::new());
+
+        // Fausse 404 : titre d'erreur et page courte ; un long article « Peugeot 404 » ne compte pas.
+        let mut missing = v16("/x");
+        missing.meta.title = Some("Page introuvable – Mon site".into());
+        missing.facts.word_count = Some(40);
+        assert_eq!(found(missing), ["soft-404"]);
+        let mut car = v16("/peugeot");
+        car.meta.title = Some("La Peugeot 404, histoire d’une berline".into());
+        assert_eq!(found(car.clone()), Vec::<&str>::new());
+        car.facts.word_count = Some(120);
+        car.meta.h1 = vec!["Erreur 404".into()];
+        assert_eq!(found(car), ["soft-404"]);
     }
 }

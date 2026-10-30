@@ -397,6 +397,9 @@ struct Thresholds {
     /// Trop de variantes `?param` d'un même chemin au-delà de N (défaut 20)
     #[arg(long, help_heading = "Seuils des règles")]
     max_query_variants: Option<usize>,
+    /// URL trop longue au-delà de N caractères (défaut 115)
+    #[arg(long, help_heading = "Seuils des règles")]
+    url_max: Option<usize>,
 }
 
 impl Thresholds {
@@ -410,6 +413,7 @@ impl Thresholds {
             min_words: self.min_words.unwrap_or(d.min_words),
             slow_ms: self.slow_ms.unwrap_or(d.slow_ms),
             max_depth: self.deep_page.unwrap_or(d.max_depth),
+            url_max: self.url_max.unwrap_or(d.url_max),
             max_query_variants: self.max_query_variants.unwrap_or(d.max_query_variants),
         }
     }

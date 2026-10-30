@@ -1,7 +1,8 @@
 name: Release desktop
 
-# Pousser un tag `v0.1.0` (= version de tauri.conf.json) compile l'application sur les trois systèmes
+# Pousser un tag `v0.2.0` (= version de tauri.conf.json) compile l'application sur les trois systèmes
 # et crée un brouillon de release GitHub avec les installateurs ; on le relit puis on le publie à la main.
+# Noms de fichiers sans version (`assets`) : la vitrine pointe vers releases/latest/download/<nom>.
 on:
   push:
     tags: ['v*']
@@ -16,12 +17,16 @@ jobs:
         include:
           - platform: macos-latest # Apple Silicon
             args: --target aarch64-apple-darwin
+            assets: CallistSEO_macos_arm64[ext]
           - platform: macos-latest # Intel
             args: --target x86_64-apple-darwin
+            assets: CallistSEO_macos_intel[ext]
           - platform: ubuntu-22.04 # .deb, .rpm, .AppImage
             args: ''
+            assets: CallistSEO_linux[ext]
           - platform: windows-latest # .exe (NSIS) et .msi
             args: ''
+            assets: CallistSEO_windows[_setup][ext]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v7
@@ -66,5 +71,8 @@ jobs:
           releaseName: CallistSEO ${{ github.ref_name }}
           releaseBody: "Installateurs de l'application desktop CallistSEO (non signés pour l'instant). Docker et ligne de commande : voir le README."
           releaseDraft: true
-          prerelease: true
+          # Pas de préversion : GitHub l'exclurait de releases/latest (liens de la vitrine, latest.json
+          # de la mise à jour automatique).
+          prerelease: false
+          releaseAssetNamePattern: ${{ matrix.assets }}
           args: ${{ matrix.args }}

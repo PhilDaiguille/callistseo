@@ -1,7 +1,7 @@
 # CallistSEO — Roadmap
 
 Document de suivi, mis à jour à chaque jalon. Légende : ✅ fait · 🟡 partiel · ⬜ à faire · ⏸ reporté.
-Dernière mise à jour : 28 oct. 2026.
+Dernière mise à jour : 29 oct. 2026.
 
 ## En un coup d'œil
 
@@ -10,11 +10,11 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 | Bloc | État | Détail |
 | --- | --- | --- |
 | Moteur de crawl (SSRF, robots, politesse, adaptatif) | ✅ | concurrence adaptative, pause / arrêt, périmètre par regex |
-| Règles SEO | ✅ 59 règles | dont un lot IA/GEO 2026 ; reste : rendu JS, orthographe |
-| Stockage et historique | ✅ | SQLite, migrations v1→v14, comparaison d'audits |
+| Règles SEO | ✅ 82 règles | dont un lot IA/GEO 2026, un lot « données existantes » (redirections temporaires, liens vers des redirections, canonical absente, pages sans lien interne, H1 dupliqué, forme des URL, x-default, sitemap bloqué par robots.txt, HTML > 2 Mo) un lot v16 (balises en double, partage social, images sans dimensions, nofollow, icône du site, fausses 404) et le CSS / JS bloqué pour Googlebot (v17) ; pas de règle `llms.txt` (voir « IA générative et idées reçues ») ; reste : rendu JS, orthographe |
+| Stockage et historique | ✅ | SQLite, migrations v1→v17, comparaison d'audits |
 | API | ✅ | projets, audits, rapports, segments, planification, configuration |
 | MCP (assistants IA) | ✅ | `callistseo mcp` : 13 outils ; reste : transport HTTP, ressources |
-| Interface web | ✅ | poste de travail, palette ⌘K, thème clair/sombre, mobile |
+| Interface web | ✅ | poste de travail, palette ⌘K, thème clair/sombre, mobile, tableau de bord (score de santé, tendance, gravités), barre latérale, vue d'ensemble d'audit groupée par gravité |
 | Desktop (Tauri) | 🟡 | fonctionne en processus ; release sur tag `v*` ; reste : essais Windows/Linux, signature |
 | Docker / web | 🟡 | image durcie et publiée (ghcr), HTTPS par Caddy, CSP, limite de connexion, journal d'accès ; reste : comptes |
 | Site vitrine | ✅ | `site/index.html` autonome ; reste : domaine et publication |
@@ -44,10 +44,10 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 ### Priorité 3 — différenciation
 
 11. **Intégrations** (désactivées par défaut, vos clés) : écran de consentement (ce qui part chez qui), clés chiffrées, quotas et plafonds de coût. **PageSpeed Insights** (Core Web Vitals), puis **Search Console et GA4** (compte de service), puis **OpenAI / Gemini** sur échantillon avec plafond.
-12. **Visualisations** : arborescence des dossiers, graphe de liens plafonné (~3 000 nœuds).
-13. **Règles à faible coût** : `data-nosnippet`, `llms.txt` (informatif), cohérence schéma / texte visible. ~~XPath pour l'extraction personnalisée~~ fait (`xpath`, via `skyscraper`).
+12. 🟡 **Visualisations** : ~~score de santé, courbe de tendance, répartition par gravité~~ faits (Recharts chargé à la demande). Reste : score par catégorie, arborescence des dossiers, graphe de liens plafonné (~3 000 nœuds).
+13. **Règles à faible coût** : ~~11 règles sur les données déjà collectées~~ (lot A, sans migration) et ~~6 règles sur de nouveaux faits~~ (lot B, migration v16 : balises en double, Open Graph / carte Twitter, images sans `width`/`height`, page en nofollow, icône du site, fausses 404 par heuristique) faites. ~~Nouveaux faits en colonnes du poste de travail~~ faits ; règles vérifiées par le banc à comptes exacts (65/65). Reste `data-nosnippet`, cohérence schéma / texte visible. ~~XPath pour l'extraction personnalisée~~ fait (`xpath`, via `skyscraper`).
 14. **MCP** : transport HTTP et ressources MCP.
-15. **Interface** : audit d'accessibilité (clavier, lecteur d'écran), tests de composants, synchronisation automatique `info.rs` ↔ `rules.ts` (test ou génération).
+15. **Interface** : audit d'accessibilité (clavier, lecteur d'écran), tests de composants, ~~synchronisation `info.rs` ↔ `rules.ts`~~ faite (`rules.test.ts` compare les deux tables).
 16. **Rapports** : HTML personnalisable (logo, agence), export PDF.
 17. **Sémantique** (issues 019-020) : similarités et clusters de pages, import Search Console.
 
@@ -67,7 +67,15 @@ Rendu JavaScript (Chrome piloté + proxy appliquant le filtre anti-SSRF), JavaSc
 | 6 | Intégrations externes : PageSpeed, Search Console, GA4 (compte de service), clés chiffrées, écran de consentement, règles CWV / impressions. Reste : essai sur de vrais comptes Google, OpenAI / Gemini | 🟡 |
 | 7 | Rendu JavaScript et le reste | ⏸ |
 
-**Lot IA / GEO 2026** : `ai-snippet-blocked`, `schema-faq-howto-retired` (officielles, doc Search Central) ; `ai-crawler-blocked`, `article-author-missing`, `article-date-missing` (bonnes pratiques GEO, étiquetées comme non exigées par Google). Aucune exigence spéciale de Google pour AI Overviews / AI Mode, pas de `llms.txt` requis, aucune règle « 2027 » (rien d'officiel annoncé).
+**IA générative et idées reçues** (guide Search Central « Optimiser pour les fonctionnalités d'IA générative », juillet 2026). Pour Google, optimiser pour Aperçu IA et le Mode IA, c'est faire du SEO : ces fonctionnalités reposent sur l'index et le classement habituels. Ce qui compte, et que CallistSEO vérifie : une page explorable (`resource-blocked` pour le CSS et le JS interdits à Googlebot), indexable, **éligible à un extrait** (`ai-snippet-blocked`), sans doublons ni fausses 404. `schema-faq-howto-retired` est officielle. `ai-crawler-blocked` est un simple constat : les robots d'autres services, Google-Extended compris, n'ont aucun effet sur la Recherche. `article-author-missing` et `article-date-missing` relèvent des propriétés recommandées de la doc Article (résultats enrichis), pas de l'IA.
+
+Ce que CallistSEO ne signale **volontairement pas**, car Google dit que c'est inutile pour la Recherche :
+- un fichier `llms.txt` ou un balisage « spécial IA » (« la recherche Google elle-même ne les utilise pas ») ;
+- un schema.org particulier pour l'IA ;
+- un découpage du contenu en petits morceaux ou une réécriture « pour l'IA » ;
+- un score « AEO / GEO ».
+
+Aucun outil tiers n'a accès aux systèmes internes de Google : CallistSEO ne prétend pas mesurer ce que Google ne publie pas. Sources : [IA générative](https://developers.google.com/search/docs/fundamentals/ai-optimization-guide?hl=fr), [contenu généré par IA](https://developers.google.com/search/docs/fundamentals/using-gen-ai-content?hl=fr), [gérer le SEO de votre site](https://developers.google.com/search/docs/fundamentals/get-started?hl=fr).
 
 Couvert de la liste Screaming Frog : liens cassés, titles et méta, directives robots, hreflang, doublons exacts, sitemaps XML (lecture et génération), données structurées, recherche et extraction personnalisées, comparaison d'audits, robots.txt personnalisé, planification, segments, configuration du crawl, vitesse, accessibilité / mobile / AMP (sous-ensemble statique), sécurité (en-têtes, contenu mixte).
 
@@ -115,7 +123,7 @@ Sécurité en place : http/https seulement ; IP privées, loopback, link-local e
 - Un audit très gros reste entièrement en mémoire jusqu'à la fin (analyse en mémoire ; étape 6).
 - Un seul jeton partagé pour l'API (pas de comptes).
 - Banc à comptes exacts : le site synthétique n'a ni hreflang, ni sitemap, ni site tiers (règles testées en unitaire) ; quasi-doublons non vérifiés sur le corpus dense.
-- Textes des règles en double (`seo-rules/src/info.rs` et `apps/web/src/lib/rules.ts`), synchronisés à la main (étape 15).
+- Textes des règles en double (`seo-rules/src/info.rs` et `apps/web/src/lib/rules.ts`) ; un test web échoue s'ils divergent.
 - Dépendances indirectes signalées comme non maintenues (`fxhash`, `proc-macro-error`, `glib` 0.18) : elles viennent de Tauri et `scraper` ; `cargo deny` (CI) ne fait échouer que les failles.
 
 ## Vision et décisions

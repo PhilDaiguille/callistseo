@@ -13,7 +13,7 @@ COPY apps/web apps/web
 RUN pnpm --filter web build
 
 # --- 2. Serveur Rust ----------------------------------------------------------------------------
-FROM rust:1-bookworm AS server
+FROM rust:1-trixie AS server
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates crates
@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     && cp target/release/callistseo /callistseo
 
 # --- 3. Image finale ----------------------------------------------------------------------------
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 RUN useradd --system --uid 10001 --home-dir /data --shell /usr/sbin/nologin callistseo \
     && mkdir -p /data && chown callistseo /data
 COPY --from=server /callistseo /usr/local/bin/callistseo
