@@ -37,6 +37,17 @@ jobs:
           version=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
           [ "${GITHUB_REF_NAME}" = "v${version}" ] || { echo "tag ${GITHUB_REF_NAME} ≠ version v${version} (tauri.conf.json)"; exit 1; }
 
+      # Une clé copiée depuis le terminal garde souvent le « % » que zsh affiche en fin de ligne :
+      # on le détecte ici, en quelques secondes, plutôt qu'après la compilation.
+      - name: Clés de signature des mises à jour lisibles
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          check() { printf '%s' "$2" | tr -d '\r\n' | grep -Eq '^[A-Za-z0-9+/]+=*$' || { echo "::error::$1 n'est pas du base64 valide (caractère parasite, souvent un « % » final copié depuis le terminal)"; exit 1; }; }
+          check "Le secret TAURI_SIGNING_PRIVATE_KEY" "$TAURI_SIGNING_PRIVATE_KEY"
+          check "La clé publique (plugins.updater.pubkey de tauri.conf.json)" "$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').plugins.updater.pubkey")"
+
       - name: Dépendances système de Tauri (Linux)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
