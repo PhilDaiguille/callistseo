@@ -16,7 +16,7 @@ use adaptive::Controller;
 
 use callistseo_core::{
     normalize, CrawlConfig, CrawledPage, PageFacts, PageMeta, UrlInterner, MAX_H2, MAX_IMAGES,
-    MAX_JSON_LD, MAX_JSON_LD_BYTES,
+    MAX_JSON_LD, MAX_JSON_LD_BYTES, MAX_RESOURCES, SOCIAL_TAGS,
 };
 use robots::Robots;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -27,7 +27,8 @@ use tokio::task::JoinSet;
 use tokio::time::{sleep_until, Instant};
 use url::Url;
 
-/// Robots IA dont l'interdiction explicite dans robots.txt est signalée (bonne pratique GEO).
+/// Robots d'IA d'autres services dont l'interdiction explicite dans robots.txt est signalée, à titre
+/// de constat : aucun n'a d'effet sur la Recherche Google (Google-Extended compris).
 const AI_BOTS: &[&str] = &[
     "GPTBot",
     "ClaudeBot",
@@ -94,6 +95,9 @@ pub async fn crawl_live(
             .collect(),
         _ => Vec::new(),
     };
+    // Ce que Googlebot a le droit de lire (ressources de rendu), indépendamment de notre user-agent.
+    // Un robots.txt d'essai s'applique aussi : on veut savoir s'il bloquerait le CSS ou le JS.
+    let googlebot = robots_txt.as_deref().map(|t| Robots::parse(t, "Googlebot"));
     let robots = Arc::new(match (&robots_txt, cfg.respect_robots) {
         (Some(t), true) => Robots::parse(t, &cfg.user_agent),
         _ => Robots::default(),
@@ -224,6 +228,15 @@ pub async fn crawl_live(
         if page.url == start_url {
             page.facts.ai_bots_blocked = ai_bots_blocked.clone();
         }
+        match &googlebot {
+            Some(g) => page.facts.blocked_resources.retain(|r| {
+                Url::parse(r).is_ok_and(|u| {
+                    !g.allowed(&u[url::Position::BeforePath..url::Position::AfterQuery])
+                })
+            }),
+            None => page.facts.blocked_resources.clear(),
+        }
+        page.facts.blocked_resources.truncate(MAX_RESOURCES);
 
         // Vec explicite, volontairement : `into_iter().map(..).collect()` réutiliserait (« in-place
         // collect ») le gros tampon de `Vec<Url>` (88 o par élément) pour des `Arc<Url>` de 8 o, et
@@ -423,6 +436,10 @@ struct Selectors {
     json_ld: scraper::Selector,
     amp_html: scraper::Selector,
     itemscope: scraper::Selector,
+    head_title: scraper::Selector,
+    social: scraper::Selector,
+    icon: scraper::Selector,
+    resources: scraper::Selector,
 }
 
 static SELECTORS: LazyLock<Selectors> = LazyLock::new(|| {
@@ -440,6 +457,11 @@ static SELECTORS: LazyLock<Selectors> = LazyLock::new(|| {
         json_ld: parse(r#"script[type="application/ld+json"]"#),
         amp_html: parse("link[rel~=amphtml][href]"),
         itemscope: parse("[itemscope]"),
+        // Dans `<head>` seulement : un `<title>` d'icône SVG dans le corps n'en est pas un.
+        head_title: parse("head title"),
+        social: parse("meta[property][content], meta[name][content]"),
+        icon: parse("link[rel~=icon][href]"),
+        resources: parse("link[rel~=stylesheet][href], script[src]"),
     }
 });
 
@@ -591,6 +613,7 @@ fn parse_html(
     extractors: &Extractors,
     facts: &mut PageFacts,
 ) -> (Vec<Url>, PageMeta) {
+    let page_host = base.host_str().map(str::to_owned);
     let source = String::from_utf8_lossy(body);
     let doc = scraper::Html::parse_document(cap_nesting(&source, MAX_NESTING));
     let sel = &*SELECTORS;
@@ -729,6 +752,52 @@ fn parse_html(
                 .collect()
         })
         .collect();
+    // Balises en double : Google peut ignorer des canonicals contradictoires.
+    facts.title_tags = Some(doc.select(&sel.head_title).count() as u32);
+    facts.description_tags = Some(
+        doc.select(&sel.meta)
+            .filter(|m| {
+                m.value()
+                    .attr("name")
+                    .is_some_and(|n| n.eq_ignore_ascii_case("description"))
+            })
+            .count() as u32,
+    );
+    facts.canonical_tags = Some(doc.select(&sel.canonical).count() as u32);
+    facts.images_unsized = Some(
+        doc.select(&sel.images)
+            .filter(|i| i.value().attr("width").is_none() || i.value().attr("height").is_none())
+            .count() as u32,
+    );
+    facts.social = SOCIAL_TAGS
+        .iter()
+        .filter(|tag| {
+            doc.select(&sel.social).any(|m| {
+                let v = m.value();
+                let key = v
+                    .attr("property")
+                    .or_else(|| v.attr("name"))
+                    .unwrap_or_default();
+                key.trim().eq_ignore_ascii_case(tag)
+                    && !v.attr("content").unwrap_or_default().trim().is_empty()
+            })
+        })
+        .map(|t| t.to_string())
+        .collect();
+    facts.icon = Some(doc.select(&sel.icon).next().is_some());
+    // Candidats seulement : la boucle du crawl ne garde que ceux que robots.txt interdit à Googlebot.
+    facts.blocked_resources = doc
+        .select(&sel.resources)
+        .filter_map(|e| {
+            let v = e.value();
+            normalize(v.attr("href").or_else(|| v.attr("src"))?.trim(), Some(base))
+        })
+        .filter(|u| u.host_str() == page_host.as_deref())
+        .map(|u| u.to_string())
+        .take(MAX_RESOURCES * 5)
+        .collect();
+    facts.blocked_resources.sort();
+    facts.blocked_resources.dedup();
     if !extractors.is_empty() {
         facts.extracted = extractors.run(&source, &doc);
     }
@@ -790,6 +859,33 @@ mod tests {
     }
 
     #[test]
+    fn counts_head_tags_social_and_icon() {
+        let html = br#"<html><head><title>A</title><title>B</title>
+            <meta name="description" content="x"><meta name="Description" content="y">
+            <link rel="canonical" href="/a"><link rel="canonical" href="/b">
+            <meta property="og:title" content="T"><meta property="og:image" content="  ">
+            <meta name="twitter:card" content="summary"><link rel="shortcut icon" href="/f.ico"></head>
+            <body><svg><title>icon</title></svg><img src="a" width="10" height="10"><img src="b" width="10"></body></html>"#;
+        let mut f = PageFacts::default();
+        parse_html(
+            html,
+            &Url::parse("http://a.test/").unwrap(),
+            &Extractors::default(),
+            &mut f,
+        );
+        // Le <title> du SVG (corps) ne compte pas ; og:image vide non plus.
+        assert_eq!(
+            (f.title_tags, f.description_tags, f.canonical_tags),
+            (Some(2), Some(2), Some(2))
+        );
+        assert_eq!(f.images_unsized, Some(1));
+        assert_eq!(f.social, ["og:title", "twitter:card"]);
+        assert_eq!(f.icon, Some(true));
+        // Pas de CSS ni de script dans ce document.
+        assert!(f.blocked_resources.is_empty());
+    }
+
+    #[test]
     fn extracts_facts() {
         let base = Url::parse("http://a.test/p/").unwrap();
         let html = br#"<html lang=" fr-FR "><head><meta name="viewport" content="width=device-width">
@@ -820,6 +916,18 @@ mod tests {
         );
         assert_eq!(f.json_ld, [r#"{"@type":"Article"}"#]);
         assert_eq!(f.nofollow_links, 1);
+        // Schéma v16 : rien de tout cela dans ce document, mais c'est mesuré.
+        assert_eq!(
+            (
+                f.title_tags,
+                f.description_tags,
+                f.canonical_tags,
+                f.images_unsized,
+                f.icon
+            ),
+            (Some(0), Some(0), Some(0), Some(3), Some(false))
+        );
+        assert!(f.social.is_empty());
         // Mots : A B Un deux trois x y (script/style exclus).
         assert_eq!(f.word_count, Some(7));
     }

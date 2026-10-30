@@ -47,6 +47,24 @@ pub fn no_snippet(i: usize) -> bool {
 pub fn faq_schema(i: usize) -> bool {
     i % 120 == 37
 }
+// Défauts des règles ajoutées ensuite (balises, images, nofollow, ressources, fausses 404).
+pub fn doubled_title(i: usize) -> bool {
+    i % 130 == 41
+}
+pub fn unsized_image(i: usize) -> bool {
+    i % 140 == 43
+}
+pub fn soft_404(i: usize) -> bool {
+    i % 150 == 47
+}
+pub fn nofollow_page(i: usize) -> bool {
+    i % 160 == 53
+}
+/// Feuille de style sous `/assets/private/`, que le robots.txt du site interdit (à Googlebot aussi).
+pub fn blocked_css(i: usize) -> bool {
+    i % 170 == 59
+}
+
 /// Pages au long texte commun (seul le numéro change) : quasi-doublons les unes des autres.
 /// Bornées à 20 pages pour rester sous le plafond de seau de la détection (200).
 pub fn near_duplicate(i: usize) -> bool {
@@ -97,10 +115,15 @@ pub fn page_html_with(i: usize, n: usize, corpus: Corpus) -> String {
     if !missing_title(i) {
         let title = if duplicate_title(i) {
             "Titre dupliqué".to_owned()
+        } else if soft_404(i) {
+            format!("Page introuvable {i}")
         } else {
             format!("Page {i}")
         };
         let _ = write!(h, "<title>{title}</title>");
+        if doubled_title(i) {
+            h.push_str("<title>Second titre</title>");
+        }
     }
     if !missing_description(i) {
         let _ = write!(
@@ -108,8 +131,23 @@ pub fn page_html_with(i: usize, n: usize, corpus: Corpus) -> String {
             "<meta name=\"description\" content=\"Description de la page {i}\">"
         );
     }
-    if no_snippet(i) {
-        h.push_str("<meta name=\"robots\" content=\"nosnippet\">");
+    // Une seule meta robots : seule la première est lue.
+    let robots: Vec<&str> = [(no_snippet(i), "nosnippet"), (nofollow_page(i), "nofollow")]
+        .into_iter()
+        .filter_map(|(on, token)| on.then_some(token))
+        .collect();
+    if !robots.is_empty() {
+        let _ = write!(
+            h,
+            "<meta name=\"robots\" content=\"{}\">",
+            robots.join(", ")
+        );
+    }
+    if blocked_css(i) {
+        let _ = write!(
+            h,
+            "<link rel=\"stylesheet\" href=\"/assets/private/{i}.css\">"
+        );
     }
     h.push_str("</head><body>");
     if !missing_h1(i) {
@@ -127,6 +165,9 @@ pub fn page_html_with(i: usize, n: usize, corpus: Corpus) -> String {
         for _ in 0..8 {
             let _ = write!(h, "<p>{LOREM}</p>");
         }
+    }
+    if unsized_image(i) {
+        let _ = write!(h, "<img src=\"/img/{i}.png\" alt=\"Illustration {i}\">");
     }
     if json_ld_incomplete(i) {
         h.push_str("<script type=\"application/ld+json\">{\"@type\":\"Article\"}</script>");
@@ -183,16 +224,32 @@ pub fn expected(n: usize, dense: bool) -> BTreeMap<&'static str, usize> {
         ("h1-missing", count(missing_h1)),
         ("broken-link", broken),
         ("http-error", broken),
+        ("head-tags-duplicate", count(doubled_title)),
+        ("image-size-missing", count(unsized_image)),
+        ("nofollow-page", count(nofollow_page)),
+        ("resource-blocked", count(blocked_css)),
+        // Le départ `/p/0` ne déclare pas d'icône.
+        ("favicon-missing", usize::from(n > 0)),
     ]);
     if !dense {
         exp.insert("content-near-duplicate", if near >= 2 { near } else { 0 });
+        // Le corpus dense dépasse le plafond de mots : un title « introuvable » y passe pour un article.
+        // La page n° 404 s'intitule « Page 404 » : courte, elle passe aussi pour une fausse 404
+        // (comportement voulu de l'heuristique, pas un faux compte).
+        exp.insert("soft-404", count(soft_404) + usize::from(n > 404));
+    } else {
+        exp.insert("soft-404", 0);
     }
     exp
 }
 
 fn route(path: &str, n: usize, corpus: Corpus) -> (u16, &'static str, String) {
     if path == "/robots.txt" {
-        return (200, "text/plain", "User-agent: *\nAllow: /\n".into());
+        return (
+            200,
+            "text/plain",
+            "User-agent: *\nAllow: /\nDisallow: /assets/private/\n".into(),
+        );
     }
     if let Some(i) = path
         .strip_prefix("/p/")

@@ -147,7 +147,7 @@ export function Layout() {
       <dialog
         ref={drawer}
         aria-label="Navigation"
-        className="m-0 h-full max-h-none bg-transparent p-0 backdrop:bg-foreground/30 lg:hidden"
+        className="m-0 h-full max-h-none overscroll-contain bg-transparent p-0 backdrop:bg-foreground/30 lg:hidden"
         onClick={(e) => (e.target === e.currentTarget || (e.target as HTMLElement).closest('a')) && drawer.current?.close()}
       >
         <AppSidebar context={context} collapsed={false} className="h-full overflow-y-auto" />

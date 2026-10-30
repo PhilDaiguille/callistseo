@@ -145,10 +145,12 @@
   }
   html {
     @apply font-sans;
+    /* L'en-tête collant ne doit pas masquer l'élément qui reçoit le focus. */
+    scroll-padding-top: 4rem;
   }
   h1, h2, h3 {
     font-family: var(--font-heading);
-    @apply tracking-tight;
+    @apply tracking-tight text-pretty;
   }
   /* Une grille sans colonnes explicites ne doit pas s'élargir au contenu le plus large (onglets,
      tableaux) : sinon la page déborde sur mobile. Les `grid-cols-*` (couche utilities) l'emportent. */

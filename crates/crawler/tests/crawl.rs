@@ -160,6 +160,52 @@ async fn honors_robots_txt_unless_ignored() {
     );
 }
 
+const RESOURCES_PAGE: &str = r#"<html><head><link rel="stylesheet" href="/assets/app.css">
+    <script src="/assets/app.js"></script><script src="/public.js"></script>
+    <link rel="stylesheet" href="http://cdn.test/x.css"></head><body>ok</body></html>"#;
+
+static GOOGLEBOT_BLOCKED: &[Route] = &[
+    ("/", 200, "", RESOURCES_PAGE),
+    (
+        "/robots.txt",
+        200,
+        "",
+        "User-agent: Googlebot\nDisallow: /assets/\n",
+    ),
+];
+
+static GOOGLEBOT_ALLOWED: &[Route] = &[
+    ("/", 200, "", RESOURCES_PAGE),
+    (
+        "/robots.txt",
+        200,
+        "",
+        "User-agent: *\nDisallow: /assets/private/\n",
+    ),
+];
+
+#[tokio::test]
+async fn css_and_js_blocked_for_googlebot_are_recorded() {
+    let home = |pages: Vec<callistseo_core::CrawledPage>| {
+        pages.into_iter().find(|p| p.url.path() == "/").unwrap()
+    };
+    // Groupe Googlebot seulement : notre robot n'est pas concerné, mais Googlebot l'est.
+    let start = serve(GOOGLEBOT_BLOCKED).await;
+    let p = home(crawl(start.clone(), local_cfg()).await.unwrap());
+    let blocked: Vec<String> = ["assets/app.css", "assets/app.js"]
+        .iter()
+        .map(|r| start.join(r).unwrap().to_string())
+        .collect();
+    assert_eq!(
+        p.facts.blocked_resources, blocked,
+        "autre hôte et /public.js exclus"
+    );
+
+    let start = serve(GOOGLEBOT_ALLOWED).await;
+    let p = home(crawl(start, local_cfg()).await.unwrap());
+    assert!(p.facts.blocked_resources.is_empty());
+}
+
 static SITEMAP_SITE: &[Route] = &[
     ("/", 200, "", r#"<a href="/linked">l</a>"#),
     ("/linked", 200, "", "ok"),

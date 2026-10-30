@@ -3499,7 +3499,7 @@ mod tests {
         };
         let (status, r) = get(format!("/api/crawls/{run}/reports")).await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(r["groups"][0]["label"], "Vue d'ensemble");
+        assert_eq!(r["groups"][0]["label"], "Ensemble du site");
         assert_eq!(r["groups"][0]["reports"][0]["id"], "all");
         assert_eq!(r["groups"][0]["reports"][0]["count"], 3);
         assert_eq!(r["issues"][0]["id"], "issue:http-error");

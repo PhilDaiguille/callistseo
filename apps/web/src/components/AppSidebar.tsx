@@ -2,14 +2,10 @@ import { Link, useLocation } from 'react-router-dom'
 import {
   CalendarClock,
   FolderKanban,
-  GitCompareArrows,
   History,
-  LayoutDashboard,
-  Network,
   PanelLeftClose,
   PanelLeftOpen,
   Settings2,
-  Table2,
   type LucideIcon,
 } from 'lucide-react'
 import { Mascot } from '@/components/Mascot'
@@ -25,12 +21,11 @@ interface Item {
   label: string
   Icon: LucideIcon
   active: boolean
-  disabled?: boolean
 }
 
 /**
- * Navigation globale : projets, puis le projet et l'audit ouverts. Les liens reprennent les
- * paramètres d'adresse existants (`?tab=`, `?r=`) : aucune nouvelle route.
+ * Navigation globale : projets, puis le projet ouvert (les vues d'un audit sont ses onglets). Les
+ * liens reprennent les paramètres d'adresse existants (`?tab=`) : aucune nouvelle route.
  */
 export function AppSidebar({
   context,
@@ -46,7 +41,7 @@ export function AppSidebar({
   const { pathname, search } = useLocation()
   const params = new URLSearchParams(search)
   const tab = params.get('tab')
-  const { project, crawl } = context
+  const { project } = context
 
   const sections: { title?: string; items: Item[] }[] = [
     { items: [{ to: '/', label: 'Projets', Icon: FolderKanban, active: pathname === '/' }] },
@@ -57,23 +52,10 @@ export function AppSidebar({
     sections.push({
       title: project.name,
       items: [
-        { to: base, label: 'Audits', Icon: History, active: here && !tab },
+        // Un audit ouvert appartient à « Audits ».
+        { to: base, label: 'Audits', Icon: History, active: (here && !tab) || pathname.startsWith('/crawls/') },
         { to: `${base}?tab=schedule`, label: 'Planification', Icon: CalendarClock, active: here && tab === 'schedule' },
         { to: `${base}?tab=config`, label: 'Configuration', Icon: Settings2, active: here && tab === 'config' },
-      ],
-    })
-  }
-  if (crawl) {
-    const base = `/crawls/${crawl.id}`
-    const here = pathname === base
-    const report = params.get('r') ?? (crawl.running ? 'all' : 'overview')
-    sections.push({
-      title: `Audit #${crawl.id}`,
-      items: [
-        { to: base, label: 'Vue d’ensemble', Icon: LayoutDashboard, active: here && !tab && report === 'overview', disabled: crawl.running },
-        { to: `${base}?r=all`, label: 'Toutes les URL', Icon: Table2, active: here && !tab && report === 'all' },
-        { to: `${base}?tab=links`, label: 'Maillage', Icon: Network, active: here && tab === 'links', disabled: crawl.running },
-        { to: `${base}?tab=diff`, label: 'Comparaison', Icon: GitCompareArrows, active: here && tab === 'diff', disabled: crawl.running },
       ],
     })
   }
@@ -90,7 +72,7 @@ export function AppSidebar({
             (collapsed ? (
               <hr className="mx-2 mb-1 border-line" />
             ) : (
-              <p className="truncate px-2 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase" title={s.title}>
+              <p className="truncate px-2 pb-1 text-xs font-semibold text-muted-foreground" title={s.title}>
                 {s.title}
               </p>
             ))}
@@ -116,7 +98,7 @@ export function AppSidebar({
 }
 
 function NavItem({ item, collapsed }: { item: Item; collapsed: boolean }) {
-  const { to, label, Icon, active, disabled } = item
+  const { to, label, Icon, active } = item
   const cls = cn(
     'flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium transition-colors',
     collapsed && 'justify-center',
@@ -128,14 +110,6 @@ function NavItem({ item, collapsed }: { item: Item; collapsed: boolean }) {
       {collapsed ? <span className="sr-only">{label}</span> : label}
     </>
   )
-  // Vue indisponible pendant un audit (problèmes et maillage sont calculés à la fin).
-  if (disabled) {
-    return (
-      <span aria-disabled="true" title={`${label} (après l’audit)`} className={cn(cls, 'cursor-not-allowed opacity-50 hover:bg-transparent hover:text-muted-foreground')}>
-        {content}
-      </span>
-    )
-  }
   return (
     <Link to={to} aria-current={active ? 'page' : undefined} title={collapsed ? label : undefined} className={cls}>
       {content}

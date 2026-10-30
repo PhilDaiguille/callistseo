@@ -41,7 +41,9 @@ API HTTP : `callistseo serve --db audits.db --token "$(openssl rand -hex 16)"` (
 L'API ne permet jamais de viser le réseau local : le filtre SSRF du crawler reste actif.
 
 Comparaison : `callistseo diff --db audits.db --before 1 --after 2` (code retour 1 si de nouvelles erreurs sont apparues).
-Seuils des règles éditoriales réglables : `--title-min`, `--title-max`, `--description-min`, `--description-max`, `--min-words`, `--slow-ms`, `--deep-page`, `--max-query-variants` (voir `callistseo crawl --help`).
+Seuils des règles éditoriales réglables : `--title-min`, `--title-max`, `--description-min`, `--description-max`, `--min-words`, `--slow-ms`, `--deep-page`, `--max-query-variants`, `--url-max` (voir `callistseo crawl --help`).
+
+Les règles s'en tiennent à ce que Google documente. Pas de règle `llms.txt`, pas de « score GEO » : la Recherche Google ne s'en sert pas (voir « IA générative et idées reçues » dans [`ROADMAP.md`](ROADMAP.md)).
 
 Code retour de `crawl` : 0 si le seuil `--fail-on` n'est pas atteint, 1 sinon, 2 si l'appel est invalide. `--fail-on error` (défaut : au moins une erreur), `warning` (erreur ou avertissement) ou `never`.
 
@@ -140,7 +142,7 @@ pnpm --filter desktop build    # bundle de l'application (macOS : .app / .dmg)
 
 Prérequis : Rust stable, Node, pnpm, et sous Linux les dépendances système de Tauri (webkit2gtk). L'application desktop n'est pas compilée par défaut (`cargo test` l'ignore) car elle exige l'interface construite.
 
-**Publier une version** : mettre la version dans `apps/desktop/src-tauri/tauri.conf.json`, puis pousser le tag correspondant (`git tag v0.1.0 && git push origin v0.1.0`). Le workflow `.github/workflows/release.yml` compile Windows (`.exe`, `.msi`), macOS (Apple Silicon et Intel, `.dmg`) et Linux (`.deb`, `.rpm`, `.AppImage`), et crée un **brouillon** de release avec ces fichiers : à relire, puis publier. Le workflow échoue si le tag ne correspond pas à la version. Les installateurs ne sont pas encore signés : Windows (SmartScreen) et macOS (Gatekeeper) afficheront un avertissement.
+**Publier une version** : mettre la version dans `apps/desktop/src-tauri/tauri.conf.json`, puis pousser le tag correspondant (`git tag v0.2.0 && git push origin v0.2.0`). Le workflow `.github/workflows/release.yml` compile Windows (`.exe`, `.msi`), macOS (Apple Silicon et Intel, `.dmg`) et Linux (`.deb`, `.rpm`, `.AppImage`), et crée un **brouillon** de release avec ces fichiers : à relire, puis publier. Les fichiers portent des noms sans version (`CallistSEO_windows_setup.exe`, `CallistSEO_macos_arm64.dmg`, `CallistSEO_linux.AppImage`…) : les boutons de la vitrine pointent vers `releases/latest/download/<nom>`, qui suit toujours la dernière release publiée (une préversion ou un brouillon n'en fait pas partie). Le workflow échoue si le tag ne correspond pas à la version. Les installateurs ne sont pas encore signés : Windows (SmartScreen) et macOS (Gatekeeper) afficheront un avertissement.
 
 **Mise à jour** : au démarrage, l'application interroge GitHub Releases (`latest.json`) et propose la version plus récente ; rien n'est installé sans clic. C'est le seul appel sortant de l'application desktop (hors ligne, il est ignoré). Les mises à jour sont signées avec une clé Tauri (distincte de la signature Windows/macOS) : `pnpm tauri signer generate`, clé publique dans `tauri.conf.json`, clé privée et son mot de passe dans les secrets GitHub `TAURI_SIGNING_PRIVATE_KEY` et `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Une release en brouillon ou en pré-version n'est pas proposée : publier la release pour la rendre disponible.
 

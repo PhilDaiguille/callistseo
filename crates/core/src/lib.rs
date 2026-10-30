@@ -284,7 +284,27 @@ pub struct PageFacts {
     pub nofollow_links: u32,
     /// Résultats des extracteurs personnalisés (nom, valeurs) ; un extracteur sans résultat est absent.
     pub extracted: Vec<(String, Vec<String>)>,
+    /// Nombre de `<title>` (dans `<head>`), de meta description et de canonical (schéma v16).
+    /// `None` : audit plus ancien, non mesuré.
+    pub title_tags: Option<u32>,
+    pub description_tags: Option<u32>,
+    pub canonical_tags: Option<u32>,
+    /// Images sans attributs `width` et `height` (risque de décalage de mise en page, CLS).
+    pub images_unsized: Option<u32>,
+    /// Balises de partage présentes et non vides, parmi `SOCIAL_TAGS`.
+    pub social: Vec<String>,
+    /// Présence d'un `<link rel="icon">`.
+    pub icon: Option<bool>,
+    /// Feuilles de style et scripts du même hôte que robots.txt interdit à Googlebot (schéma v17,
+    /// plafonné à `MAX_RESOURCES`). Le crawler y range d'abord tous les candidats, puis filtre.
+    pub blocked_resources: Vec<String>,
 }
+
+/// Plafond des ressources CSS / JS relevées par page.
+pub const MAX_RESOURCES: usize = 20;
+
+/// Balises de partage social relevées (Open Graph et carte Twitter / X).
+pub const SOCIAL_TAGS: &[&str] = &["og:title", "og:description", "og:image", "twitter:card"];
 
 impl PageFacts {
     /// Valeur d'un en-tête enregistré.

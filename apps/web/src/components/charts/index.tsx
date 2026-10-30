@@ -2,7 +2,7 @@ import { lazy, Suspense } from 'react'
 import { Skeleton } from '@/components/Skeleton'
 import type { Severity } from '@/lib/api'
 import { SEVERITY_LABEL } from '@/lib/rules'
-import { SCORE_LABEL, scoreColor, scoreLevel } from '@/lib/score'
+import { SCORE_LABEL, SEVERITY_COLOR, scoreColor, scoreLevel } from '@/lib/score'
 import { cn } from '@/lib/utils'
 
 const GaugeRing = lazy(() => import('./Charts').then((m) => ({ default: m.GaugeRing })))
@@ -38,11 +38,8 @@ export function ScorePill({ score, className }: { score: number; className?: str
   )
 }
 
-// Pastels de la charte : rouge doux, ambre, lavande (`--primary`).
-const SEVERITY_COLOR: Record<Severity, string> = { Error: 'var(--score-bad)', Warning: 'var(--score-mid)', Info: 'var(--primary)' }
-
 // ponytail: barre empilée en flex, Recharts n'apporte rien pour trois segments.
-/** Répartition des URL concernées par gravité, avec la légende chiffrée. */
+/** Répartition des problèmes (URL × règle) par gravité, avec la légende chiffrée. */
 export function SeverityBar({ totals }: { totals: Record<Severity, number> }) {
   const order: Severity[] = ['Error', 'Warning', 'Info']
   const sum = order.reduce((n, s) => n + totals[s], 0)

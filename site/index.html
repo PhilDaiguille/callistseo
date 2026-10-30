@@ -105,8 +105,17 @@
     .steps p { margin: 0; color: var(--muted); font-size: .95rem; }
 
     /* Installation */
-    .install { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .install { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+    .download { border: 2px solid var(--ink); border-radius: 18px; background: var(--card); box-shadow: 6px 6px 0 var(--shadow); padding: 26px; margin-bottom: 24px; display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; }
+    .download h3 { font-size: 1.35rem; font-weight: 900; margin-bottom: 6px; }
+    .download p { margin: 0; }
+    .os { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .os .btn { justify-content: center; flex-direction: column; gap: 0; line-height: 1.25; }
+    .os .btn small { font-weight: 500; font-size: .78rem; opacity: .75; }
+    .more { grid-column: 1 / -1; font-size: .9rem; }
     .install .card h3 { display: flex; align-items: center; gap: 8px; }
+    /* Un bloc de code long défile dans sa carte au lieu d'élargir la page (mobile). */
+    .install > *, .download > * { min-width: 0; }
     pre { margin: 14px 0 0; padding: 14px; border-radius: 12px; background: #1D1C19; color: #F3EFE4; font: .8rem/1.6 ui-monospace, monospace; overflow-x: auto; }
     pre .c { color: #A9A394; }
 
@@ -127,7 +136,7 @@
 
     @media (max-width: 880px) {
       .hero .wrap, .team { grid-template-columns: 1fr; }
-      .grid, .steps, .install { grid-template-columns: 1fr; }
+      .grid, .steps, .install, .download { grid-template-columns: 1fr; }
       header nav a:not(.primary) { display: none; }
       .hero { padding-top: 44px; }
     }
@@ -283,19 +292,28 @@
           <h2>Installer CallistSEO</h2>
           <p class="muted">Choisissez selon votre usage. Tout est gratuit, sans inscription.</p>
         </div>
+        <div class="download">
+          <div>
+            <h3>L’application, pour vous</h3>
+            <p class="muted">Tout tourne sur votre ordinateur, sans réseau ouvert ni mot de passe. Elle se met à jour toute seule.</p>
+          </div>
+          <div class="os">
+            <a class="btn primary" href="https://github.com/PhilDaiguille/callistseo/releases/latest/download/CallistSEO_windows_setup.exe">Windows<small>10 et 11, .exe</small></a>
+            <a class="btn" href="https://github.com/PhilDaiguille/callistseo/releases/latest/download/CallistSEO_macos_arm64.dmg">macOS<small>Apple Silicon (M1 et +)</small></a>
+            <a class="btn" href="https://github.com/PhilDaiguille/callistseo/releases/latest/download/CallistSEO_macos_intel.dmg">macOS<small>processeur Intel</small></a>
+            <a class="btn" href="https://github.com/PhilDaiguille/callistseo/releases/latest/download/CallistSEO_linux.AppImage">Linux<small>AppImage</small></a>
+          </div>
+          <p class="more muted">Autres formats : <a href="https://github.com/PhilDaiguille/callistseo/releases/latest/download/CallistSEO_windows.msi">Windows .msi</a>, <a href="https://github.com/PhilDaiguille/callistseo/releases/latest/download/CallistSEO_linux.deb">Linux .deb</a>, <a href="https://github.com/PhilDaiguille/callistseo/releases/latest/download/CallistSEO_linux.rpm">Linux .rpm</a>, ou <a href="https://github.com/PhilDaiguille/callistseo/releases">toutes les versions</a>. Préversion non signée : à la première ouverture, Windows propose «&nbsp;Exécuter quand même&nbsp;» (après «&nbsp;Informations complémentaires&nbsp;») et macOS demande une autorisation dans Réglages, Confidentialité et sécurité.</p>
+        </div>
         <div class="install">
           <article class="card">
-            <h3>Pour l’équipe · Docker</h3>
-            <p>Un conteneur sert l’interface et l’API sur votre serveur.</p>
-<pre><span class="c"># dans le dossier deploy/</span>
+            <h3>Pour l’équipe, sur votre serveur</h3>
+            <p>Une image Docker sert l’interface et l’API (amd64 et arm64), avec HTTPS automatique en option.</p>
+<pre><span class="c"># dans le dossier deploy/ du dépôt</span>
 cp .env.example .env
-<span class="c"># mot de passe d'équipe : CALLISTSEO_TOKEN</span>
-docker compose up -d --build</pre>
-          </article>
-          <article class="card">
-            <h3>Pour vous · Desktop</h3>
-            <p>Application pour Windows, macOS et Linux (préversion). Tout tourne sur votre ordinateur, sans réseau ouvert ni mot de passe.</p>
-            <p style="margin-top:14px"><a class="btn sm" href="https://github.com/PhilDaiguille/CallistSEO/releases/latest">Télécharger</a></p>
+<span class="c"># CALLISTSEO_IMAGE=ghcr.io/phildaiguille/callistseo:latest</span>
+<span class="c"># CALLISTSEO_TOKEN = mot de passe de l'équipe</span>
+docker compose pull &amp;&amp; docker compose up -d</pre>
           </article>
           <article class="card">
             <h3>En ligne de commande</h3>

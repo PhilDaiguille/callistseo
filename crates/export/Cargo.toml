@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 callistseo-core = { path = "../core" }
-callistseo-seo-rules = { version = "0.1.0", path = "../seo-rules" }
+callistseo-seo-rules = { version = "0.2.0", path = "../seo-rules" }
 serde_json.workspace = true
 
 [dev-dependencies]

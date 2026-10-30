@@ -43,8 +43,8 @@ const RESPONSE: &[&str] = &[
 const META: &[&str] = &["url", "title", "description", "h1", "word_count"];
 
 pub const REPORTS: &[Report] = &[
-    Report { id: "all", group: "Vue d'ensemble", label: "Toutes les URL", predicate: "1=1", columns: BASE },
-    Report { id: "html", group: "Vue d'ensemble", label: "Pages HTML", predicate: "p.is_html = 1", columns: BASE },
+    Report { id: "all", group: "Ensemble du site", label: "Toutes les URL", predicate: "1=1", columns: BASE },
+    Report { id: "html", group: "Ensemble du site", label: "Pages HTML", predicate: "p.is_html = 1", columns: BASE },
     Report { id: "internal-ok", group: "Réponse", label: "Succès (2xx)", predicate: "p.status BETWEEN 200 AND 299", columns: RESPONSE },
     Report { id: "redirects", group: "Réponse", label: "Redirections (3xx)", predicate: "p.status BETWEEN 300 AND 399", columns: &["url", "status", "redirect_to", "depth"] },
     Report { id: "client-errors", group: "Réponse", label: "Erreurs client (4xx)", predicate: "p.status BETWEEN 400 AND 499", columns: &["url", "status", "inlinks", "depth"] },
@@ -217,6 +217,42 @@ pub const COLUMNS: &[Column] = &[
         id: "outlinks",
         label: "Liens sortants internes",
         sql: "p.outlinks",
+        numeric: true,
+    },
+    Column {
+        id: "title_tags",
+        label: "Nb title",
+        sql: "p.title_tags",
+        numeric: true,
+    },
+    Column {
+        id: "canonical_tags",
+        label: "Nb canonical",
+        sql: "p.canonical_tags",
+        numeric: true,
+    },
+    Column {
+        id: "images_unsized",
+        label: "Images sans dimensions",
+        sql: "p.images_unsized",
+        numeric: true,
+    },
+    Column {
+        id: "social",
+        label: "Partage social",
+        sql: "(SELECT group_concat(value, ', ') FROM json_each(p.social))",
+        numeric: false,
+    },
+    Column {
+        id: "icon",
+        label: "Icône déclarée",
+        sql: "CASE p.icon WHEN 1 THEN 'oui' WHEN 0 THEN 'non' END",
+        numeric: false,
+    },
+    Column {
+        id: "blocked_resources",
+        label: "CSS/JS bloqués (Googlebot)",
+        sql: "coalesce(json_array_length(p.blocked_resources), 0)",
         numeric: true,
     },
     Column {
@@ -582,6 +618,21 @@ mod tests {
         assert_eq!(urls(&store, run, "slow"), ["/slow"]);
         assert_eq!(urls(&store, run, "in-sitemap"), ["/a"]);
         assert_eq!(urls(&store, run, "not-in-sitemap"), ["/b", "/slow"]);
+    }
+
+    /// Chaque colonne de la liste blanche est une expression SQL valide, affichée comme triée.
+    #[test]
+    fn every_column_can_be_shown_and_sorted() {
+        let (store, run) = store();
+        let ids: Vec<&str> = COLUMNS.iter().map(|c| c.id).collect();
+        for c in COLUMNS {
+            let mut q = query(Scope::Report(report("all").unwrap()), &ids);
+            q.sort = Some(c);
+            let (total, rows) = store
+                .report_rows(run, &q)
+                .unwrap_or_else(|e| panic!("colonne {} : {e}", c.id));
+            assert_eq!((total, rows[0].len()), (5, ids.len()), "colonne {}", c.id);
+        }
     }
 
     #[test]

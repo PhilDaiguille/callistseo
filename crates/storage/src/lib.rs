@@ -195,6 +195,19 @@ CREATE TABLE integration_secrets (
     data BLOB NOT NULL
 );
 ",
+    // v16 : balises en double, images sans dimensions, partage social, icône.
+    "
+ALTER TABLE pages ADD COLUMN title_tags INTEGER;
+ALTER TABLE pages ADD COLUMN description_tags INTEGER;
+ALTER TABLE pages ADD COLUMN canonical_tags INTEGER;
+ALTER TABLE pages ADD COLUMN images_unsized INTEGER;
+ALTER TABLE pages ADD COLUMN social TEXT;
+ALTER TABLE pages ADD COLUMN icon INTEGER;
+",
+    // v17 : ressources CSS / JS interdites à Googlebot par robots.txt.
+    "
+ALTER TABLE pages ADD COLUMN blocked_resources TEXT;
+",
 ];
 
 /// Nœud du graphe de liens : (URL, profondeur, statut HTTP).
@@ -1347,7 +1360,8 @@ impl Store {
 }
 
 const PAGE_COLS: &str = "id, url, depth, status, redirect_to, is_html, in_sitemap, title, description, h1, canonical, robots, error, \
-    ttfb_ms, total_ms, size, content_type, headers, content_hash, word_count, lang, viewport, h2, hreflang, images, images_total, json_ld, nofollow_links, extracted, simhash, amp_html, is_amp, microdata, microdata_untyped, sitemap_lastmod, anchor_empty, anchor_generic, external_broken, ai_bots_blocked";
+    ttfb_ms, total_ms, size, content_type, headers, content_hash, word_count, lang, viewport, h2, hreflang, images, images_total, json_ld, nofollow_links, extracted, simhash, amp_html, is_amp, microdata, microdata_untyped, sitemap_lastmod, anchor_empty, anchor_generic, external_broken, ai_bots_blocked, \
+    title_tags, description_tags, canonical_tags, images_unsized, social, icon, blocked_resources";
 
 /// Liste vide → NULL (les pages sans liste n'occupent rien dans la base).
 fn list_json<T: serde::Serialize>(v: &[T]) -> Result<Option<String>> {
@@ -1407,6 +1421,13 @@ fn read_facts(r: &Row) -> rusqlite::Result<PageFacts> {
         anchor_generic: r.get::<_, Option<u32>>(36)?.unwrap_or_default(),
         external_broken: json_col(r, 37)?,
         ai_bots_blocked: json_col(r, 38)?,
+        title_tags: r.get(39)?,
+        description_tags: r.get(40)?,
+        canonical_tags: r.get(41)?,
+        images_unsized: r.get(42)?,
+        social: json_col(r, 43)?,
+        icon: r.get(44)?,
+        blocked_resources: json_col(r, 45)?,
     })
 }
 const ISSUE_COLS: &str = "rule, severity, url, message";
@@ -1504,9 +1525,11 @@ pub struct Inlink {
 const PAGE_INSERT: &str = "INSERT INTO pages (run_id, url, depth, status, redirect_to, is_html, in_sitemap, \
      title, description, h1, canonical, robots, error, ttfb_ms, total_ms, size, \
      content_type, headers, content_hash, word_count, lang, viewport, h2, hreflang, \
-     images, images_total, json_ld, nofollow_links, extracted, simhash, amp_html, is_amp, microdata, microdata_untyped, sitemap_lastmod, anchor_empty, anchor_generic, external_broken, ai_bots_blocked) \
+     images, images_total, json_ld, nofollow_links, extracted, simhash, amp_html, is_amp, microdata, microdata_untyped, sitemap_lastmod, anchor_empty, anchor_generic, external_broken, ai_bots_blocked, \
+     title_tags, description_tags, canonical_tags, images_unsized, social, icon, blocked_resources) \
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-     ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39)";
+     ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, \
+     ?40, ?41, ?42, ?43, ?44, ?45, ?46)";
 
 /// Une ligne de `pages` (sans ses liens) ; renvoie son identifiant.
 fn insert_page(stmt: &mut rusqlite::Statement, run_id: i64, p: &CrawledPage) -> Result<i64> {
@@ -1552,6 +1575,13 @@ fn insert_page(stmt: &mut rusqlite::Statement, run_id: i64, p: &CrawledPage) -> 
         f.anchor_generic,
         list_json(&f.external_broken)?,
         list_json(&f.ai_bots_blocked)?,
+        f.title_tags,
+        f.description_tags,
+        f.canonical_tags,
+        f.images_unsized,
+        list_json(&f.social)?,
+        f.icon,
+        list_json(&f.blocked_resources)?,
     ])
     .map_err(db)
 }
@@ -1973,6 +2003,13 @@ mod tests {
             json_ld: vec![r#"{"@type":"Article"}"#.into()],
             nofollow_links: 3,
             extracted: vec![("ga".into(), vec!["UA-1".into(), "UA-2".into()])],
+            title_tags: Some(2),
+            description_tags: Some(1),
+            canonical_tags: Some(0),
+            images_unsized: Some(5),
+            social: vec!["og:title".into()],
+            icon: Some(false),
+            blocked_resources: vec!["https://a.test/assets/app.css".into()],
         };
         let mut store = Store::open_in_memory().unwrap();
         let id = store
@@ -1989,6 +2026,18 @@ mod tests {
         assert_eq!(f.simhash.as_deref(), Some("0f0f0f0f0f0f0f0f"));
         assert_eq!(f.sitemap_lastmod.as_deref(), Some("2026-01-02"));
         assert_eq!(f.ai_bots_blocked, ["GPTBot"]);
+        assert_eq!(
+            (
+                f.title_tags,
+                f.description_tags,
+                f.canonical_tags,
+                f.images_unsized,
+                f.icon
+            ),
+            (Some(2), Some(1), Some(0), Some(5), Some(false))
+        );
+        assert_eq!(f.social, ["og:title"]);
+        assert_eq!(f.blocked_resources, ["https://a.test/assets/app.css"]);
         assert_eq!(
             (f.anchor_empty, f.anchor_generic, f.external_broken.len()),
             (3, 4, 1)

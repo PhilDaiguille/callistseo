@@ -5,21 +5,20 @@ import { RunBadge } from '@/components/Badges'
 import { PageSkeleton } from '@/components/Skeleton'
 import { QueryError } from '@/components/QueryError'
 import { RunProgress } from '@/components/RunProgress'
-import { HealthGauge } from '@/components/charts'
-import { Stat } from '@/components/Stat'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api, downloadExport, downloadSitemap } from '@/lib/api'
 import { EXAMPLES_PER_RULE, issuesMarkdown } from '@/lib/aiReport'
-import { errorDelta, healthDelta, previousDone } from '@/lib/delta'
-import { SCORE_LABEL, scoreLevel } from '@/lib/score'
-import { cn } from '@/lib/utils'
-import { formatDate, formatDuration } from '@/lib/format'
+import { formatDateAt, formatDuration } from '@/lib/format'
 import { useDocumentTitle } from '@/lib/title'
 import { useQueryParams } from '@/lib/useQueryParams'
+import { AuditOverview } from './AuditOverview'
 import { DiffView } from './DiffView'
 import { LinksView } from './LinksView'
 import { Workstation } from './Workstation'
+
+const TABS = ['overview', 'data', 'links', 'diff'] as const
+type Tab = (typeof TABS)[number]
 
 export function CrawlPage() {
   const id = Number(useParams().id)
@@ -27,7 +26,6 @@ export function CrawlPage() {
   const [params, update] = useQueryParams()
   const [exportError, setExportError] = useState<unknown>(null)
   const tabParam = params.get('tab')
-  const tab = tabParam === 'links' || tabParam === 'diff' ? tabParam : 'data'
 
   const crawl = useQuery({
     queryKey: ['crawl', id],
@@ -80,6 +78,7 @@ export function CrawlPage() {
     return () => clearInterval(timer)
   }, [status, id, queryClient])
 
+  const reports = useQuery({ queryKey: ['reports', id], queryFn: () => api.reports(id) })
   const projectId = crawl.data?.project_id
   // L'historique du projet sert à situer cet audit par rapport au précédent.
   const history = useQuery({ queryKey: ['project', projectId], queryFn: () => api.project(projectId ?? 0), enabled: projectId !== undefined })
@@ -88,10 +87,11 @@ export function CrawlPage() {
   if (crawl.error) return <QueryError error={crawl.error} />
   if (!crawl.data) return <PageSkeleton />
   const c = crawl.data
-  const previous = c.status === 'done' && history.data ? previousDone(c, history.data.crawls) : null
-  const delta = previous ? errorDelta(c, previous) : null
-  const scoreDelta = healthDelta(c, previous)
   const running = c.status === 'running'
+  // Vue d'ensemble par défaut une fois l'audit terminé ; un ancien lien `?r=<rapport>` ouvre l'explorateur.
+  const report = params.get('r')
+  const tab = TABS.includes(tabParam as Tab) ? (tabParam as Tab) : running || (report && report !== 'overview') ? 'data' : 'overview'
+  const showTab = (t: string) => update({ tab: t, ...(report === 'overview' ? { r: null } : {}) })
 
   return (
     <div className="flex flex-col gap-4 lg:h-full lg:min-h-0">
@@ -119,9 +119,11 @@ export function CrawlPage() {
               </div>
             )}
           </div>
-          <p className="min-w-0 truncate text-sm text-muted-foreground" title={c.start_url}>
-            {c.start_url} · {formatDate(c.started_at)} · {formatDuration(c.started_at, c.finished_at)}
-            {running && ' (en cours)'}
+          <p className="min-w-0 text-sm text-muted-foreground [overflow-wrap:anywhere]">
+            <a href={c.start_url} target="_blank" rel="noopener noreferrer" className="text-foreground underline-offset-4 hover:underline" title={c.start_url}>
+              {c.start_url}
+            </a>
+            , lancé le {formatDateAt(c.started_at)}, {running ? `depuis ${formatDuration(c.started_at, null)}` : `durée ${formatDuration(c.started_at, c.finished_at)}`}
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -160,57 +162,18 @@ export function CrawlPage() {
       {c.error && <QueryError error={new Error(c.error)} />}
       <QueryError error={cancel.error} />
       <QueryError error={control.error} />
-
       <QueryError error={exportError} />
 
-      <div className="grid shrink-0 grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Résumé de l’audit" role="group">
-        {c.health !== null && (
-          <div className="panel-pop col-span-2 flex items-center gap-4 px-4 py-3 xl:col-span-1">
-            <HealthGauge score={c.health} size={72} />
-            <div className="min-w-0">
-              <p className="text-xs font-medium text-muted-foreground">Score de santé</p>
-              <p className="font-heading text-lg font-extrabold">{SCORE_LABEL[scoreLevel(c.health)]}</p>
-              {scoreDelta !== null && previous && (
-                <p className={cn('text-xs', scoreDelta < 0 ? 'font-semibold text-destructive' : scoreDelta > 0 ? 'font-semibold' : 'text-muted-foreground')}>
-                  {scoreDelta > 0 ? '▲ +' : scoreDelta < 0 ? '▼ −' : '= '}
-                  {Math.abs(scoreDelta)} pts depuis l’audit #{previous.id}
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-        <Stat label={running ? 'URL explorées' : 'URL'} value={c.pages} />
-        {!running && (
-          <>
-            <Stat
-              label="Erreurs"
-              value={c.errors}
-              alert
-              onClick={() => update({ tab: null, r: 'overview' })}
-              hint={
-                delta && (
-                  <span className={delta.tone === 'worse' ? 'font-semibold text-destructive' : delta.tone === 'better' ? 'font-semibold' : 'text-muted-foreground'}>
-                    {delta.tone === 'worse' ? '▲' : delta.tone === 'better' ? '▼' : '='} {delta.text}
-                  </span>
-                )
-              }
-            />
-            <Stat label="Avertissements" value={c.warnings} onClick={() => update({ tab: null, r: 'overview' })} />
-          </>
-        )}
-      </div>
-
       {running && (
-        <div className="panel flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm" role="status">
+        <div className="panel flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm" role="status" aria-live="polite">
           <span className="font-semibold">
-            {c.live?.paused ? 'Audit en pause' : c.live?.stopping ? 'Arrêt en cours…' : 'Audit en cours'}
+            {c.live?.paused ? 'Audit en pause' : c.live?.stopping ? 'Arrêt en cours…' : `Audit en cours : ${c.pages.toLocaleString('fr-FR')} URL explorées`}
           </span>
           <RunProgress pages={c.pages} live={c.live} className="order-last m-0 max-w-none" />
           {c.live && (
             <span className="text-muted-foreground">
-              {c.live.urls_per_second.toFixed(1)} URL/s · file {c.live.queued} · {Math.round(c.live.avg_latency_ms)} ms · concurrence{' '}
-              {c.live.concurrency}
-              {c.live.failures > 0 && ` · ${c.live.failures} échec(s)`}
+              {c.live.urls_per_second.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} URL/s, {c.live.queued.toLocaleString('fr-FR')} en file, {Math.round(c.live.avg_latency_ms)} ms par page
+              {c.live.failures > 0 && `, ${c.live.failures} échec(s)`}
             </span>
           )}
           <span className="basis-full text-muted-foreground">
@@ -218,29 +181,41 @@ export function CrawlPage() {
           </span>
         </div>
       )}
+
       <div className="flex min-h-0 flex-1 flex-col gap-4">
-          <Tabs value={tab} onValueChange={(v) => update({ tab: v === 'data' ? null : String(v) })}>
-            <TabsList>
-              <TabsTrigger value="data">Données</TabsTrigger>
-              <TabsTrigger value="links" disabled={running}>
-                Maillage
-              </TabsTrigger>
-              <TabsTrigger value="diff" disabled={running}>
-                Comparaison
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-          {tab === 'data' && (
-            <div className="min-h-0 flex-1">
-              <Workstation crawlId={id} projectId={c.project_id} running={running} onTab={(t) => update({ tab: t })} />
-            </div>
-          )}
-          {tab !== 'data' && !running && (
-            <div className="min-h-0 flex-1 lg:overflow-auto">
-              {tab === 'links' && <LinksView crawlId={id} crawlStatus={c.status} />}
-              {tab === 'diff' && <DiffView crawlId={id} projectId={c.project_id} />}
-            </div>
-          )}
+        <Tabs value={tab} onValueChange={(v) => showTab(String(v))}>
+          <TabsList>
+            <TabsTrigger value="overview" disabled={running}>
+              Vue d’ensemble
+            </TabsTrigger>
+            <TabsTrigger value="data">Explorer les URL</TabsTrigger>
+            <TabsTrigger value="links" disabled={running}>
+              Maillage
+            </TabsTrigger>
+            <TabsTrigger value="diff" disabled={running}>
+              Comparaison
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+        {tab === 'data' && (
+          <div className="min-h-0 flex-1">
+            <Workstation crawlId={id} projectId={c.project_id} onTab={showTab} />
+          </div>
+        )}
+        {tab !== 'data' && !running && (
+          <div className="min-h-0 flex-1 lg:overflow-auto lg:pr-1">
+            {tab === 'overview' &&
+              (reports.error ? (
+                <QueryError error={reports.error} />
+              ) : reports.data ? (
+                <AuditOverview crawl={c} history={history.data?.crawls} reports={reports.data} onOpen={(r) => update({ tab: 'data', r, sel: null, sort: null, dir: null, cols: null })} />
+              ) : (
+                <PageSkeleton />
+              ))}
+            {tab === 'links' && <LinksView crawlId={id} crawlStatus={c.status} />}
+            {tab === 'diff' && <DiffView crawlId={id} projectId={c.project_id} />}
+          </div>
+        )}
       </div>
     </div>
   )

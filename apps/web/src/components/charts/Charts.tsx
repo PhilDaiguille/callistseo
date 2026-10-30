@@ -18,7 +18,7 @@ export function GaugeRing({ score, size }: { score: number; size: number }) {
 export function TrendLines({ points }: { points: { id: number; health: number; errors: number }[] }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={points} margin={{ top: 8, right: 12, bottom: 0, left: -16 }}>
+      <LineChart data={points} margin={{ top: 8, right: 24, bottom: 0, left: -16 }}>
         <CartesianGrid stroke="var(--line)" vertical={false} />
         <XAxis dataKey="id" tickFormatter={(id: number) => `#${id}`} tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }} axisLine={false} tickLine={false} />
         <YAxis domain={[0, 100]} ticks={[0, 50, 80, 100]} tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }} axisLine={false} tickLine={false} />
