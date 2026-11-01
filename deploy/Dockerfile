@@ -19,8 +19,12 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates crates
 # L'application desktop est un membre du workspace : son manifeste doit exister, elle n'est pas compilée.
 COPY apps/desktop/src-tauri apps/desktop/src-tauri
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
+# Un cache par architecture, verrouillé : amd64 et arm64 se construisent en parallèle et se
+# marchaient dessus (dépendance décompressée deux fois, « File exists »), voire mélangeaient leurs
+# binaires dans un `target` commun.
+ARG TARGETPLATFORM
+RUN --mount=type=cache,id=cargo-registry-${TARGETPLATFORM},target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=cargo-target-${TARGETPLATFORM},target=/src/target,sharing=locked \
     cargo build --release --locked -p callistseo-cli \
     && cp target/release/callistseo /callistseo
 
