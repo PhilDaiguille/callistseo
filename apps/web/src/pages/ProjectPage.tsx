@@ -4,6 +4,7 @@ import { SlidersHorizontal } from 'lucide-react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { RunBadge } from '@/components/Badges'
 import { DeleteProject } from '@/components/DeleteProject'
+import { AssistantCard, GetStarted } from '@/components/GetStarted'
 import { IntegrationsCard } from '@/components/IntegrationsCard'
 import { ProjectConfigCard } from '@/components/ProjectConfigCard'
 import { ScheduleCard } from '@/components/ScheduleCard'
@@ -111,6 +112,13 @@ export function ProjectPage() {
             <DeleteProject id={id} name={p.name} audits={p.crawls.length} running={p.crawls.some((c) => c.status === 'running')} />
           </div>
         </div>
+      )}
+
+      {tab === 'audits' && (
+        <>
+          <AssistantCard projectName={p.name} startUrl={p.start_url} />
+          <GetStarted projectId={id} audits={p.crawls.length} />
+        </>
       )}
 
       {tab === 'audits' && latest && (

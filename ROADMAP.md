@@ -14,7 +14,7 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 | Stockage et historique | ✅ | SQLite, migrations v1→v17, comparaison d'audits |
 | API | ✅ | projets, audits, rapports, segments, planification, configuration |
 | MCP (assistants IA) | ✅ | `callistseo mcp` : 13 outils ; reste : transport HTTP, ressources |
-| Interface web | ✅ | poste de travail, palette ⌘K, thème clair/sombre, mobile, tableau de bord (score de santé, tendance, gravités), barre latérale avec sélecteur de projet (structure façon OpenSEO), vue d'ensemble d'audit groupée par gravité, bannière de mise à jour (desktop) ; reste : accueil guidé, carte assistant IA, vue Search Console |
+| Interface web | ✅ | poste de travail, palette ⌘K, thème clair/sombre, mobile, tableau de bord (score de santé, tendance, gravités), barre latérale avec sélecteur de projet (structure façon OpenSEO), vue d'ensemble d'audit groupée par gravité, bannière de mise à jour (desktop) ; accueil guidé « Premiers pas » et carte assistant IA (MCP) sur la page projet ; reste : vue Search Console |
 | Desktop (Tauri) | 🟡 | fonctionne en processus ; release sur tag `v*` ; reste : essais Windows/Linux, signature |
 | Docker / web | 🟡 | image durcie et publiée (ghcr), HTTPS par Caddy, CSP, limite de connexion, journal d'accès ; reste : comptes |
 | Site vitrine | ✅ | `site/index.html` autonome ; reste : domaine et publication |
@@ -50,8 +50,8 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 15. **Interface** : audit d'accessibilité (clavier, lecteur d'écran ; en premier le sélecteur de projet de la barre latérale), tests de composants, ~~synchronisation `info.rs` ↔ `rules.ts`~~ faite (`rules.test.ts` compare les deux tables).
 16. **Rapports** : HTML personnalisable (logo, agence), export PDF.
 17. **Sémantique** (issues 019-020) : similarités et clusters de pages, import Search Console.
-18. **Accueil guidé** : liste « Premiers pas » sur l'accueil d'un projet (créer le projet, lancer un audit, planifier, brancher Search Console), étapes cochées d'après les données existantes, repliable.
-19. **Assistant IA dans l'interface** : carte « Demandez à votre assistant » qui fait connaître le serveur MCP (commande de configuration à copier, exemple de demande), sans appel sortant.
+18. ✅ **Accueil guidé** (fait, `components/GetStarted.tsx`) : liste « Premiers pas » sur l'accueil d'un projet (créer le projet, lancer un audit, planifier, brancher Search Console), étapes cochées d'après les données existantes, repliable.
+19. ✅ **Assistant IA dans l'interface** (fait, `AssistantCard`) : carte « Demandez à votre assistant » qui fait connaître le serveur MCP (commande de configuration à copier, exemple de demande), sans appel sortant.
 20. **Vue Search Console** : clics, impressions, CTR et position par page et par période (28 j, 3 mois), à partir de l'intégration existante (phase 6) ; suivi de positions limité aux données de Search Console.
 21. **Comptes d'équipe** : utilisateurs nominatifs et invitations (aujourd'hui un seul jeton partagé, voir « Dette connue »).
 22. **Langue** : interface en anglais en plus du français (textes extraits, règles comprises : `info.rs` et `rules.ts`).
