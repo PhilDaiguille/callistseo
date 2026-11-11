@@ -72,8 +72,11 @@ export function ProjectsPage() {
 
   return (
     <div className="grid gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-3xl font-extrabold tracking-tight">Projets</h1>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-extrabold tracking-tight">Projets</h1>
+          <p className="text-muted-foreground">Santé, liens et historique de tous vos sites audités.</p>
+        </div>
         {!empty && !creating && <Button onClick={() => setCreating(true)}>Nouveau projet</Button>}
       </div>
       {(creating || empty) && <NewProjectForm onDone={() => setCreating(false)} />}

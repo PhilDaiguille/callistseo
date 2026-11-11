@@ -21,11 +21,11 @@ function Tabs({
 }
 
 const tabsListVariants = cva(
-  "group/tabs-list inline-flex w-fit max-w-full items-center justify-center gap-1 overflow-x-auto rounded-2xl p-1 text-muted-foreground group-data-horizontal/tabs:h-12 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col data-[variant=line]:rounded-none",
+  "group/tabs-list inline-flex w-fit max-w-full items-center justify-center gap-1 overflow-x-auto rounded-2xl p-1 text-muted-foreground group-data-horizontal/tabs:h-11 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col data-[variant=line]:rounded-none",
   {
     variants: {
       variant: {
-        default: "bg-secondary",
+        default: "bg-muted",
         line: "gap-1 bg-transparent",
       },
     },
@@ -56,7 +56,7 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
       data-slot="tabs-trigger"
       className={cn(
         "relative inline-flex h-full flex-1 items-center justify-center gap-1.5 rounded-xl border border-transparent px-4 text-sm font-semibold whitespace-nowrap text-muted-foreground transition-[background-color,box-shadow] group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start hover:text-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-        "data-active:border-line data-active:bg-card data-active:text-foreground data-active:shadow-pop-sm",
+        "data-active:border-line data-active:bg-card data-active:text-foreground data-active:shadow-sm",
         className
       )}
       {...props}

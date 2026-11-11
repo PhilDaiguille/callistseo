@@ -1,7 +1,7 @@
 # CallistSEO — Roadmap
 
 Document de suivi, mis à jour à chaque jalon. Légende : ✅ fait · 🟡 partiel · ⬜ à faire · ⏸ reporté.
-Dernière mise à jour : 29 oct. 2026.
+Dernière mise à jour : 11 nov. 2026 (v0.2.1).
 
 ## En un coup d'œil
 
@@ -14,7 +14,7 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 | Stockage et historique | ✅ | SQLite, migrations v1→v17, comparaison d'audits |
 | API | ✅ | projets, audits, rapports, segments, planification, configuration |
 | MCP (assistants IA) | ✅ | `callistseo mcp` : 13 outils ; reste : transport HTTP, ressources |
-| Interface web | ✅ | poste de travail, palette ⌘K, thème clair/sombre, mobile, tableau de bord (score de santé, tendance, gravités), barre latérale, vue d'ensemble d'audit groupée par gravité |
+| Interface web | ✅ | poste de travail, palette ⌘K, thème clair/sombre, mobile, tableau de bord (score de santé, tendance, gravités), barre latérale avec sélecteur de projet (structure façon OpenSEO), vue d'ensemble d'audit groupée par gravité, bannière de mise à jour (desktop) ; reste : accueil guidé, carte assistant IA, vue Search Console |
 | Desktop (Tauri) | 🟡 | fonctionne en processus ; release sur tag `v*` ; reste : essais Windows/Linux, signature |
 | Docker / web | 🟡 | image durcie et publiée (ghcr), HTTPS par Caddy, CSP, limite de connexion, journal d'accès ; reste : comptes |
 | Site vitrine | ✅ | `site/index.html` autonome ; reste : domaine et publication |
@@ -31,7 +31,7 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 3. ~~Déploiement web~~ fait : image `ghcr.io` amd64/arm64 publiée sur tag `v*` (`docker.yml`, jamais lancé), profil `https` (Caddy) dans le compose, CSP et en-têtes de sécurité, 10 échecs de connexion par minute et par adresse, journal d'accès. Reste : premier tag pour vérifier la publication.
 4. **Desktop** : essais réels Windows / Linux (builds de `release.yml` jamais lancés sur une vraie machine), validation visuelle de la fenêtre et des exports natifs, signature / notarisation, icône définitive (mise à jour : étape 5 bis).
 5. **Validation terrain** : 5 testeurs professionnels, dont 3 réutilisent l'outil sur un autre site.
-5 bis. 🟡 **Mise à jour du service** : web fait (version dans l'interface et `/api/health`, `docker compose pull && up -d` documenté, migrations automatiques avec copie `audits.db.avant-v<N>.bak`, retour arrière documenté). Desktop : vérification au démarrage (updater Tauri, bannière, installation sur clic) ; un appel sortant vers GitHub Releases à chaque lancement. Reste : générer la clé de signature (`pubkey` dans `tauri.conf.json`, secrets `TAURI_SIGNING_PRIVATE_KEY` et `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) et publier la release (le brouillon n'est pas visible de `releases/latest`).
+5 bis. 🟡 **Mise à jour du service** : web fait (version dans l'interface et `/api/health`, `docker compose pull && up -d` documenté, migrations automatiques avec copie `audits.db.avant-v<N>.bak`, retour arrière documenté). Desktop : vérification au démarrage (updater Tauri, bannière, installation sur clic) ; un appel sortant vers GitHub Releases à chaque lancement. Clé publique en place (`pubkey` dans `tauri.conf.json`), tags v0.2.0 et v0.2.1 poussés. Reste : vérifier que la release v0.2.1 est publiée (un brouillon n'est pas visible de `releases/latest`) et que la mise à jour s'installe depuis v0.2.0.
 
 ### Priorité 2 — valeur produit
 
@@ -47,13 +47,22 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 12. 🟡 **Visualisations** : ~~score de santé, courbe de tendance, répartition par gravité~~ faits (Recharts chargé à la demande). Reste : score par catégorie, arborescence des dossiers, graphe de liens plafonné (~3 000 nœuds).
 13. **Règles à faible coût** : ~~11 règles sur les données déjà collectées~~ (lot A, sans migration) et ~~6 règles sur de nouveaux faits~~ (lot B, migration v16 : balises en double, Open Graph / carte Twitter, images sans `width`/`height`, page en nofollow, icône du site, fausses 404 par heuristique) faites. ~~Nouveaux faits en colonnes du poste de travail~~ faits ; règles vérifiées par le banc à comptes exacts (65/65). Reste `data-nosnippet`, cohérence schéma / texte visible. ~~XPath pour l'extraction personnalisée~~ fait (`xpath`, via `skyscraper`).
 14. **MCP** : transport HTTP et ressources MCP.
-15. **Interface** : audit d'accessibilité (clavier, lecteur d'écran), tests de composants, ~~synchronisation `info.rs` ↔ `rules.ts`~~ faite (`rules.test.ts` compare les deux tables).
+15. **Interface** : audit d'accessibilité (clavier, lecteur d'écran ; en premier le sélecteur de projet de la barre latérale), tests de composants, ~~synchronisation `info.rs` ↔ `rules.ts`~~ faite (`rules.test.ts` compare les deux tables).
 16. **Rapports** : HTML personnalisable (logo, agence), export PDF.
 17. **Sémantique** (issues 019-020) : similarités et clusters de pages, import Search Console.
+18. **Accueil guidé** : liste « Premiers pas » sur l'accueil d'un projet (créer le projet, lancer un audit, planifier, brancher Search Console), étapes cochées d'après les données existantes, repliable.
+19. **Assistant IA dans l'interface** : carte « Demandez à votre assistant » qui fait connaître le serveur MCP (commande de configuration à copier, exemple de demande), sans appel sortant.
+20. **Vue Search Console** : clics, impressions, CTR et position par page et par période (28 j, 3 mois), à partir de l'intégration existante (phase 6) ; suivi de positions limité aux données de Search Console.
+21. **Comptes d'équipe** : utilisateurs nominatifs et invitations (aujourd'hui un seul jeton partagé, voir « Dette connue »).
+22. **Langue** : interface en anglais en plus du français (textes extraits, règles comprises : `info.rs` et `rules.ts`).
+23. **Données** : rétention des audits (purge des anciens, réglable par projet), sauvegarde et restauration de la base depuis l'interface (export / import).
+24. **Documentation utilisateur** : guide des rapports et une fiche par règle (pourquoi, comment corriger, faux positifs connus), publiée avec le site vitrine.
 
 ### Plus tard (phase 7)
 
 Rendu JavaScript (Chrome piloté + proxy appliquant le filtre anti-SSRF), JavaScript personnalisé, accessibilité et mobile complets (axe, Lighthouse), validation AMP complète, orthographe et grammaire. Hors ressources du projet : métriques de liens (Ahrefs / Moz / Majestic), connecteur Looker Studio (remplacé par les exports).
+
+**Volontairement hors périmètre** (présent dans OpenSEO, mais demande des données propriétaires payantes) : recherche de mots-clés et volumes, backlinks, vue d'un domaine concurrent, suivi des prompts IA, SEO local. CallistSEO reste un outil d'audit technique ; la Search Console (étape 20) couvre les positions du site lui-même.
 
 ## Fait
 
@@ -81,7 +90,7 @@ Couvert de la liste Screaming Frog : liens cassés, titles et méta, directives 
 
 ## Socle technique
 
-Workspace Cargo `core` / `crawler` / `seo-rules` / `storage` / `audit-diff` / `export` / `api` / `cli` / `mcp` / `bench` + application desktop ; environ 140 tests Rust et 47 tests front ; CI GitHub Actions (fmt + clippy + test). Testé en réel sur https://bytemeuh.phildaiguille.fr/ : 68 URL, 0 erreur.
+Workspace Cargo `core` / `crawler` / `seo-rules` / `storage` / `audit-diff` / `export` / `api` / `cli` / `mcp` / `bench` + application desktop ; environ 180 tests Rust et 60 tests front ; CI GitHub Actions (fmt + clippy + test). Testé en réel sur https://bytemeuh.phildaiguille.fr/ : 68 URL, 0 erreur.
 
 ```
 callistseo crawl <url> [--max-pages --max-depth --concurrency --allow-private --ignore-robots]
@@ -98,11 +107,11 @@ Sécurité en place : http/https seulement ; IP privées, loopback, link-local e
 | 001 | Monorepo Cargo + pnpm | ✅ | `SECURITY.md`, `CONTRIBUTING.md` ajoutés |
 | 002 | Types métier + normalisation d'URL | 🟡 | reste : `CrawlRun`, `Issue` comme types dédiés |
 | 003 | Client HTTP avec limites de sécurité | ✅ | `--user-agent` validé, `robots.txt` ciblé sur le jeton de produit (RFC 9309) ; URL du robot : étape 1 |
-| 004 | File de crawl + déduplication | ✅ | `Crawl-delay`, `--delay-ms`, pause sur 429/503 (`Retry-After` secondes ou date) |
+| 004 | File de crawl + déduplication | ✅ | `Crawl-delay`, `--delay-ms`, pause sur 429/503 (`Retry-After` secondes ou date), rythme calé sur les en-têtes `RateLimit*`, délai doublé à chaque 429 |
 | 005 | Découverte de liens + profondeur | ✅ | `<base href>` pris en compte ; `rel=nofollow` exploré volontairement |
 | 006 | Métadonnées et directives SEO | ✅ | `X-Robots-Tag`, hreflang ; Open Graph si besoin |
 | 007 | Corpus de fixtures + tests | ✅ | tests SSRF, corpus `crates/crawler/tests/fixtures` (pages piégées) |
-| 008 | Persistance SQLite | 🟡 | reste : politique de rétention, `CrawlRun` / `Issue` dédiés |
+| 008 | Persistance SQLite | 🟡 | reste : politique de rétention (étape 23), `CrawlRun` / `Issue` dédiés |
 | 009 | CLI de crawl | ✅ | `--format text\|csv\|json`, `--db` / `--project`, `runs`, `export`, `diff` |
 | 010 | Règles SEO + regroupement des problèmes | 🟡 | gravité harmonisée (source unique, `--fail-on`) ; seuils réglables en CLI ; reste : doc des faux positifs (étape 8) ; piste : exclure des doublons les pages dont la canonical pointe ailleurs |
 | 011 | Snapshots + comparaison (`audit-diff`) | ✅ | `callistseo diff` (code retour 1 si nouvelles erreurs, utilisable en CI) ; reste : étape 10 |
@@ -112,7 +121,7 @@ Sécurité en place : http/https seulement ; IP privées, loopback, link-local e
 | 015 | Tauri 2 + adaptateur desktop | 🟡 | backend en processus (`LocalApi`), aucun port ouvert ; testé sur macOS ; reste : étape 4 |
 | 016 | Exports CSV, JSON, HTML | ✅ | CSV neutralisé contre l'injection de formules, HTML autonome sans script ; reste : étape 16 |
 | 017 | Docker Compose + web | 🟡 | conteneur durci, jeton obligatoire, sonde de santé, HTTPS (Caddy), image publiée ; testé Docker 29 ; reste : comptes nominatifs |
-| 018 | Benchmarks reproductibles | ✅ | `callistseo-bench`, 54/54 comptes exacts, ≈ 42 000 pages/s, ≈ 2,1 Ko/page (Apple M5) ; reste : autres machines, scénarios lourds, CI (étape 8) |
+| 018 | Benchmarks reproductibles | ✅ | `callistseo-bench`, 65/65 comptes exacts, ≈ 42 000 pages/s, ≈ 2,1 Ko/page (Apple M5) ; reste : autres machines, scénarios lourds, CI (étape 8) |
 | 019 | Similarités et clusters de pages | ⬜ | étape 17 |
 | 020 | Import Google Search Console | ⬜ | étape 11 |
 
