@@ -9,3 +9,7 @@ dist
 *.db-shm
 /apps/desktop/src-tauri/gen
 .openchamber/
+
+# Le projet utilise pnpm (pnpm-lock.yaml) : un verrou npm ou yarn ajouté par erreur ferait échouer Renovate.
+package-lock.json
+yarn.lock
