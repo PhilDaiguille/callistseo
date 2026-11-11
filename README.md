@@ -16,7 +16,7 @@ Projet en construction, avant bêta : moteur de crawl, règles SEO, CLI, API, in
 cargo run -p callistseo-cli -- crawl https://example.com --max-pages 500 --max-depth 5 --concurrency 8
 ```
 
-Politesse : `--delay-ms N` impose un délai minimal entre deux requêtes ; le `Crawl-delay` de robots.txt est appliqué automatiquement (le plus grand des deux l'emporte, plafonné à 30 s ; `--ignore-robots` le désactive). Si le serveur répond 429 ou 503, tout le crawl se met en pause (`Retry-After`, ou 1 s) et l'URL est retentée une fois.
+Politesse : `--delay-ms N` impose un délai minimal entre deux requêtes ; le `Crawl-delay` de robots.txt est appliqué automatiquement (le plus grand des deux l'emporte, plafonné à 30 s ; `--ignore-robots` le désactive). Si le serveur répond 429 ou 503, tout le crawl se met en pause (`Retry-After`, ou 1 s) et l'URL est retentée (une fois pour un 503, jusqu'à 4 fois pour un 429). Le crawler cale son rythme sur le quota annoncé par le site (`RateLimit-Policy`, `RateLimit`, `RateLimit-Remaining`/`Reset` et leurs variantes `X-RateLimit-*`) et attend la remise à zéro quand il est épuisé ; sans indication, chaque 429 double le délai entre deux requêtes (500 ms au départ, 30 s au plus).
 
 Sortie texte : une ligne par URL (`statut  profondeur  url  note  h1  title`), puis les problèmes détectés (gravité, règle, URL, message).
 Exports : `--format csv --out ./rapport` (écrit `pages.csv` et `issues.csv`) ou `--format html` (rapport autonome : un seul fichier, sans script ni ressource externe ; stdout, ou `report.html` avec `--out`) ou `--format json` (stdout, ou `report.json` avec `--out`).
