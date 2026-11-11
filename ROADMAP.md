@@ -1,7 +1,7 @@
 # CallistSEO — Roadmap
 
 Document de suivi, mis à jour à chaque jalon. Légende : ✅ fait · 🟡 partiel · ⬜ à faire · ⏸ reporté.
-Dernière mise à jour : 11 nov. 2026 (v0.2.1).
+Dernière mise à jour : 11 nov. 2026 (v0.3.0).
 
 ## En un coup d'œil
 
@@ -31,7 +31,7 @@ Le moteur (crawl, règles, stockage, exports, API, interface web, desktop, Docke
 3. ~~Déploiement web~~ fait : image `ghcr.io` amd64/arm64 publiée sur tag `v*` (`docker.yml`, jamais lancé), profil `https` (Caddy) dans le compose, CSP et en-têtes de sécurité, 10 échecs de connexion par minute et par adresse, journal d'accès. Reste : premier tag pour vérifier la publication.
 4. **Desktop** : essais réels Windows / Linux (builds de `release.yml` jamais lancés sur une vraie machine), validation visuelle de la fenêtre et des exports natifs, signature / notarisation, icône définitive (mise à jour : étape 5 bis).
 5. **Validation terrain** : 5 testeurs professionnels, dont 3 réutilisent l'outil sur un autre site.
-5 bis. 🟡 **Mise à jour du service** : web fait (version dans l'interface et `/api/health`, `docker compose pull && up -d` documenté, migrations automatiques avec copie `audits.db.avant-v<N>.bak`, retour arrière documenté). Desktop : vérification au démarrage (updater Tauri, bannière, installation sur clic) ; un appel sortant vers GitHub Releases à chaque lancement. Clé publique en place (`pubkey` dans `tauri.conf.json`), tags v0.2.0 et v0.2.1 poussés. Reste : vérifier que la release v0.2.1 est publiée (un brouillon n'est pas visible de `releases/latest`) et que la mise à jour s'installe depuis v0.2.0.
+5 bis. 🟡 **Mise à jour du service** : web fait (version dans l'interface et `/api/health`, `docker compose pull && up -d` documenté, migrations automatiques avec copie `audits.db.avant-v<N>.bak`, retour arrière documenté). Desktop : vérification au démarrage (updater Tauri, bannière, installation sur clic) ; un appel sortant vers GitHub Releases à chaque lancement. Clé publique en place (`pubkey` dans `tauri.conf.json`), tags v0.2.0, v0.2.1 et v0.3.0 poussés. Reste : vérifier que la release v0.2.1 est publiée (un brouillon n'est pas visible de `releases/latest`) et que la mise à jour s'installe depuis v0.2.0.
 
 ### Priorité 2 — valeur produit
 
