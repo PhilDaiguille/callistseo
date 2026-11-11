@@ -411,6 +411,68 @@ async fn rate_limited_responses_pause_the_crawl_and_are_retried_once() {
     assert_eq!(pages.len(), 3, "chaque URL n'apparaît qu'une fois");
 }
 
+#[tokio::test]
+async fn a_rate_limited_sitemap_is_retried_instead_of_lost() {
+    let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = hits.clone();
+    let start = serve_with(move |path, nth| match path {
+        "/" => (200, "", "accueil"),
+        "/sitemap.xml" => {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if nth == 1 {
+                (429, "Retry-After: 1\r\n", "slow down")
+            } else {
+                (200, "", "<urlset></urlset>")
+            }
+        }
+        _ => (404, "", "nope"),
+    })
+    .await;
+    crawl(start, local_cfg()).await.unwrap();
+    assert_eq!(
+        hits.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "sitemap relu après le 429"
+    );
+}
+
+#[tokio::test]
+async fn crawler_slows_down_to_the_rate_a_site_accepts() {
+    // Le site refuse (429, sans Retry-After) toute requête à moins de 300 ms de la précédente.
+    let last = std::sync::Mutex::new(None::<std::time::Instant>);
+    let start = serve_with(move |path, _| {
+        let mut last = last.lock().unwrap();
+        let too_fast = last.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(300));
+        if !too_fast {
+            *last = Some(std::time::Instant::now());
+        }
+        match (too_fast, path) {
+            (true, _) => (429, "", "slow down"),
+            (_, "/") => (
+                200,
+                "",
+                r#"<a href="/a">a</a><a href="/b">b</a><a href="/c">c</a><a href="/d">d</a>"#,
+            ),
+            _ => (200, "", "ok"),
+        }
+    })
+    .await;
+    let cfg = CrawlConfig {
+        concurrency: 4,
+        ..local_cfg()
+    };
+    let pages = crawl(start, cfg).await.unwrap();
+    assert_eq!(pages.len(), 5);
+    assert!(
+        pages.iter().all(|p| p.status == Some(200)),
+        "{:?}",
+        pages
+            .iter()
+            .map(|p| (p.url.path(), p.status))
+            .collect::<Vec<_>>()
+    );
+}
+
 /// Non-régression mémoire (trouvé avec dhat) : `into_iter().map().collect()` réutilisait le tampon
 /// de `Vec<Url>` et chaque page gardait ≈ 45 Ko de capacité inutilisée pour ses liens.
 #[tokio::test]

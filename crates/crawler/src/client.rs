@@ -61,6 +61,8 @@ pub struct Fetched {
     pub location: Option<String>,
     /// `Retry-After` (secondes ou date HTTP).
     pub retry_after: Option<Duration>,
+    /// Rythme annoncé par le site (en-têtes `RateLimit*` / `X-RateLimit-*`), voir `rate_hint`.
+    pub rate: RateHint,
     /// Corps HTML (tronqué à `max_body_bytes`) ; `None` si la réponse n'est pas du HTML 2xx.
     pub html: Option<Vec<u8>>,
     /// Délai jusqu'aux en-têtes, puis jusqu'à la fin du corps.
@@ -79,6 +81,8 @@ pub struct Client {
     allow_private: bool,
     /// Identifiants et la seule origine qui les reçoit (voir `for_site`).
     auth: Option<(url::Origin, SiteAuth)>,
+    /// Le site a déjà répondu 429 (robots.txt, sitemaps) : l'audit démarre ralenti.
+    throttled: std::sync::atomic::AtomicBool,
 }
 
 /// En-têtes que l'accès à un site ne peut pas remplacer : protocole, identifiant du robot (fixé
@@ -183,6 +187,7 @@ impl Client {
             max_body: cfg.max_body_bytes,
             allow_private: cfg.allow_private,
             auth: None,
+            throttled: Default::default(),
         })
     }
 
@@ -195,6 +200,11 @@ impl Client {
             c.auth = Some((start.origin(), cfg.auth.clone()));
         }
         Ok(c)
+    }
+
+    /// Vrai si le site a déjà demandé de ralentir (429) hors du crawl des pages.
+    pub fn throttled(&self) -> bool {
+        self.throttled.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Requête GET, avec les identifiants si `url` est l'origine de l'audit.
@@ -354,12 +364,29 @@ impl Client {
     }
 
     /// Comme `get_text`, mais l'erreur porte le statut HTTP (`None` = échec réseau ou URL interdite).
+    /// Un 429 est retenté après la pause demandée (`Retry-After`, sinon 2, 4, 8 s).
     async fn get_text_status(&self, url: &Url, max: usize) -> Result<String, Option<u16>> {
+        const RETRIES: u32 = 3;
         self.check(url).map_err(|_| None)?;
-        let mut resp = self.get(url).send().await.map_err(|_| None)?;
-        if !resp.status().is_success() {
-            return Err(Some(resp.status().as_u16()));
-        }
+        let mut tries = 0;
+        let mut resp = loop {
+            let resp = self.get(url).send().await.map_err(|_| None)?;
+            let status = resp.status().as_u16();
+            // ponytail: 429 seulement ; un 503 garde son sens (robots.txt injoignable = tout interdit).
+            if status == 429 {
+                self.throttled
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                if tries < RETRIES {
+                    tries += 1;
+                    tokio::time::sleep(throttle_wait(&resp, tries)).await;
+                    continue;
+                }
+            }
+            if !resp.status().is_success() {
+                return Err(Some(status));
+            }
+            break resp;
+        };
         let mut buf = Vec::new();
         while let Some(c) = resp.chunk().await.map_err(|_| None)? {
             buf.extend_from_slice(&c);
@@ -401,6 +428,10 @@ impl Client {
             .and_then(|v| v.to_str().ok())
             .and_then(retry_after_secs)
             .map(Duration::from_secs);
+        let rate = rate_hint(
+            |name| resp.headers().get(name)?.to_str().ok(),
+            std::time::SystemTime::now(),
+        );
         let is_html = resp
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
@@ -424,6 +455,7 @@ impl Client {
             status,
             location,
             retry_after,
+            rate,
             html,
             ttfb,
             total: started.elapsed(),
@@ -513,6 +545,23 @@ mod tests {
     }
 }
 
+/// Pause avant la `n`-ième reprise : `Retry-After` s'il est donné, sinon 2^n s ; entre 1 et 60 s.
+pub(crate) fn throttle_wait(resp: &reqwest::Response, n: u32) -> Duration {
+    let asked = resp
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(retry_after_secs);
+    backoff(asked.map(Duration::from_secs), n)
+}
+
+/// `asked` (pause demandée par le site) ou 2^n s, borné à [1 s, 60 s].
+pub(crate) fn backoff(asked: Option<Duration>, n: u32) -> Duration {
+    asked
+        .unwrap_or(Duration::from_secs(1 << n.min(6)))
+        .clamp(Duration::from_secs(1), Duration::from_secs(60))
+}
+
 /// `Retry-After` : nombre de secondes, ou date HTTP (dans le passé = 0).
 fn retry_after_secs(v: &str) -> Option<u64> {
     let v = v.trim();
@@ -535,5 +584,136 @@ mod retry_after_tests {
         assert_eq!(retry_after_secs("Wed, 21 Oct 2015 07:28:00 GMT"), Some(0));
         assert!(retry_after_secs("Fri, 31 Dec 2100 23:59:59 GMT").unwrap() > 1_000_000);
         assert_eq!(retry_after_secs("bientôt"), None);
+    }
+}
+
+/// Limite annoncée par le serveur : intervalle minimal entre deux requêtes, et pause si le quota est épuisé.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct RateHint {
+    pub interval: Option<Duration>,
+    pub pause: Option<Duration>,
+}
+
+/// Lit les en-têtes de quota courants : `RateLimit-Policy: 100;w=60` (ou `"p";q=100;w=60`),
+/// `RateLimit: "p";r=0;t=30`, et `RateLimit-Remaining/Reset` avec ou sans préfixe `X-`.
+/// Intervalle = fenêtre / quota, ou temps restant / requêtes restantes ; quota épuisé = pause jusqu'au reset.
+fn rate_hint<'a>(get: impl Fn(&str) -> Option<&'a str>, now: std::time::SystemTime) -> RateHint {
+    let param = |item: &str, key: &str| {
+        item.split(';').find_map(|p| {
+            p.trim()
+                .strip_prefix(key)?
+                .strip_prefix('=')?
+                .trim()
+                .parse::<f64>()
+                .ok()
+        })
+    };
+    let secs = |s: f64| Duration::try_from_secs_f64(s).ok();
+    let mut interval: Option<Duration> = None;
+    let mut keep = |d: Option<Duration>| interval = interval.max(d);
+    if let Some(policy) = get("ratelimit-policy") {
+        for item in policy.split(',') {
+            let quota = param(item, "q").or_else(|| item.split(';').next()?.trim().parse().ok());
+            if let (Some(q), Some(w)) = (quota, param(item, "w")) {
+                if q > 0.0 {
+                    keep(secs(w / q));
+                }
+            }
+        }
+    }
+    let combined = get("ratelimit");
+    let remaining = combined.and_then(|v| param(v, "r")).or_else(|| {
+        get("ratelimit-remaining")
+            .or_else(|| get("x-ratelimit-remaining"))?
+            .trim()
+            .parse()
+            .ok()
+    });
+    let reset = combined.and_then(|v| param(v, "t")).or_else(|| {
+        let v: f64 = get("ratelimit-reset")
+            .or_else(|| get("x-ratelimit-reset"))?
+            .trim()
+            .parse()
+            .ok()?;
+        // Au-delà d'un milliard : horodatage Unix (GitHub et d'autres), sinon secondes restantes.
+        if v > 1e9 {
+            let now = now
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_secs_f64();
+            Some((v - now).max(0.0))
+        } else {
+            Some(v)
+        }
+    });
+    let mut pause = None;
+    if let (Some(r), Some(t)) = (remaining, reset) {
+        if r < 1.0 {
+            pause = secs(t);
+        } else {
+            keep(secs(t / r));
+        }
+    }
+    RateHint { interval, pause }
+}
+
+#[cfg(test)]
+mod rate_hint_tests {
+    use super::{rate_hint, RateHint};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    fn hint(headers: &[(&str, &'static str)]) -> RateHint {
+        let now = UNIX_EPOCH + Duration::from_secs(2_000_000_000);
+        rate_hint(
+            |n| headers.iter().find(|(k, _)| *k == n).map(|(_, v)| *v),
+            now,
+        )
+    }
+
+    #[test]
+    fn reads_the_common_quota_headers() {
+        assert_eq!(hint(&[]), RateHint::default());
+        let s = |x: f64| Some(Duration::from_secs_f64(x));
+        assert_eq!(hint(&[("ratelimit-policy", "120;w=60")]).interval, s(0.5));
+        // Plusieurs politiques : la plus stricte gagne.
+        assert_eq!(
+            hint(&[(
+                "ratelimit-policy",
+                r#""court";q=10;w=1, "long";q=600;w=3600"#
+            )])
+            .interval,
+            s(6.0)
+        );
+        assert_eq!(
+            hint(&[("x-ratelimit-remaining", "20"), ("x-ratelimit-reset", "10")]).interval,
+            s(0.5)
+        );
+        // Quota épuisé, reset en horodatage Unix dans 30 s.
+        let h = hint(&[
+            ("x-ratelimit-remaining", "0"),
+            ("x-ratelimit-reset", "2000000030"),
+        ]);
+        assert_eq!((h.interval, h.pause), (None, s(30.0)));
+        assert_eq!(hint(&[("ratelimit", r#""p";r=0;t=12"#)]).pause, s(12.0));
+        assert_eq!(
+            hint(&[("ratelimit-policy", "beaucoup;w=x")]),
+            RateHint::default()
+        );
+    }
+}
+
+#[cfg(test)]
+mod backoff_tests {
+    use super::backoff;
+    use std::time::Duration;
+
+    #[test]
+    fn grows_then_caps_and_honours_the_site() {
+        let s = Duration::from_secs;
+        assert_eq!(backoff(None, 1), s(2));
+        assert_eq!(backoff(None, 3), s(8));
+        assert_eq!(backoff(None, 20), s(60));
+        assert_eq!(backoff(Some(s(45)), 1), s(45));
+        assert_eq!(backoff(Some(s(600)), 1), s(60));
     }
 }

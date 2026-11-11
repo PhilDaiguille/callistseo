@@ -43,8 +43,12 @@ const MAX_DELAY: Duration = Duration::from_secs(30);
 /// Pause imposée par un 429/503 : `Retry-After` borné à cet intervalle (1 s si absent).
 const MIN_PAUSE: Duration = Duration::from_secs(1);
 const MAX_PAUSE: Duration = Duration::from_secs(60);
-/// Une URL qui répond 429/503 est retentée une fois, puis son statut est conservé tel quel.
+/// Une URL qui répond 503 est retentée une fois, une 429 jusqu'à 6 fois (pauses 2, 4 … 60 s) (le site dit seulement
+/// « trop vite » : la page existe), puis le statut est conservé tel quel.
 const MAX_RETRIES: u32 = 1;
+const MAX_RETRIES_429: u32 = 6;
+/// Premier délai imposé après un 429 sans indication du site ; il double à chaque nouveau 429.
+const MIN_DELAY_429: Duration = Duration::from_millis(500);
 
 /// Explore le site à partir de `start`, en restant sur le même hôte.
 /// Les redirections ne sont pas suivies en place : la cible est une nouvelle URL
@@ -124,10 +128,14 @@ pub async fn crawl_live(
     } else {
         None
     };
-    let delay = cfg
+    let mut delay = cfg
         .delay
         .max(robots_delay.unwrap_or_default())
         .min(MAX_DELAY);
+    if client.throttled() {
+        // Le site a déjà refusé robots.txt ou un sitemap : on ne repart pas à pleine vitesse.
+        delay = delay.max(MIN_DELAY_429);
+    }
     // Un délai impose déjà le rythme (une requête à la fois par créneau) : concurrence fixe.
     let mut ctl = if delay.is_zero() {
         Controller::new(cfg.concurrency, cfg.max_concurrency)
@@ -138,6 +146,8 @@ pub async fn crawl_live(
     stats.max_pages.store(cfg.max_pages, Ordering::Relaxed);
     let mut next_slot = Instant::now();
     let mut retries: HashMap<Url, u32> = HashMap::new();
+    // Dernier ralentissement après un 429 : les réponses déjà en vol à ce moment ne le redoublent pas.
+    let mut slowed_at: Option<Instant> = None;
     // Une seule allocation par URL distincte, partagée par `seen`, la file et les liens des pages.
     let mut interner = UrlInterner::default();
     let start_url = start.clone();
@@ -196,8 +206,23 @@ pub async fn crawl_live(
             mut page,
             links,
             retry_after,
+            rate,
             timing,
         } = done.map_err(|e| e.to_string())?;
+        // Rythme annoncé par le site : on ne va jamais plus vite que son quota.
+        if let Some(i) = rate.interval {
+            delay = delay.max(i).min(MAX_DELAY);
+        }
+        if let Some(p) = rate.pause {
+            next_slot = next_slot.max(Instant::now() + p.min(MAX_PAUSE));
+        }
+        let limited = page.status == Some(429);
+        // ponytail: « déjà en vol » estimé par le temps (un délai écoulé depuis le dernier ralentissement).
+        if limited && slowed_at.is_none_or(|t| t.elapsed() >= delay) {
+            // Pas (ou plus assez) d'indication du site : on double le délai jusqu'à ne plus être refusé.
+            delay = (delay * 2).max(MIN_DELAY_429).min(MAX_DELAY);
+            slowed_at = Some(Instant::now());
+        }
         if let Some((latency, bad)) = timing {
             stats
                 .limit
@@ -216,8 +241,20 @@ pub async fn crawl_live(
         if let Some(wait) = retry_after {
             // Le serveur demande de ralentir : on suspend tout le crawl, puis on retente une fois.
             let tries = retries.entry(page.url.clone()).or_default();
-            if *tries < MAX_RETRIES {
+            if *tries
+                < if limited {
+                    MAX_RETRIES_429
+                } else {
+                    MAX_RETRIES
+                }
+            {
                 *tries += 1;
+                // 429 : la pause s'allonge à chaque refus (une fenêtre de quota peut durer une minute).
+                let wait = if limited {
+                    client::backoff(Some(wait).filter(|w| *w > MIN_PAUSE), *tries)
+                } else {
+                    wait
+                };
                 next_slot = next_slot.max(Instant::now() + wait.clamp(MIN_PAUSE, MAX_PAUSE));
                 queue.push_front((interner.intern(page.url.clone()), page.depth));
                 continue;
@@ -336,6 +373,8 @@ struct Visited {
     links: Vec<Url>,
     /// Pause demandée par le serveur (429/503), à respecter avant de retenter.
     retry_after: Option<Duration>,
+    /// Quota annoncé par le site.
+    rate: client::RateHint,
     /// (durée de la requête, en échec ?) ; `None` si aucune requête n'a eu lieu (robots.txt).
     timing: Option<(Duration, bool)>,
 }
@@ -366,10 +405,12 @@ async fn visit(
             page,
             links: Vec::new(),
             retry_after: None,
+            rate: Default::default(),
             timing: None,
         };
     }
     let mut retry_after = None;
+    let mut rate = client::RateHint::default();
     let mut links = Vec::new();
     let started = std::time::Instant::now();
     let fetched = client.fetch(&url).await;
@@ -383,6 +424,7 @@ async fn visit(
         Err(e) => page.error = Some(e),
         Ok(f) => {
             page.status = Some(f.status);
+            rate = f.rate;
             if matches!(f.status, 429 | 503) {
                 retry_after = Some(f.retry_after.unwrap_or(MIN_PAUSE));
             }
@@ -417,6 +459,7 @@ async fn visit(
         page,
         links,
         retry_after,
+        rate,
         timing: Some((elapsed, bad)),
     }
 }
