@@ -30,6 +30,9 @@ RUN --mount=type=cache,id=cargo-registry-${TARGETPLATFORM},target=/usr/local/car
 
 # --- 3. Image finale ----------------------------------------------------------------------------
 FROM debian:trixie-slim
+# Certificats racines : sans eux, reqwest refuse de créer le client HTTPS (« builder error »).
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 RUN useradd --system --uid 10001 --home-dir /data --shell /usr/sbin/nologin callistseo \
     && mkdir -p /data && chown callistseo /data
 COPY --from=server /callistseo /usr/local/bin/callistseo
