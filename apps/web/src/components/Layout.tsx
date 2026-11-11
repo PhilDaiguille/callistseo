@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { Link, Outlet, useMatch, useNavigate } from 'react-router-dom'
-import { ChevronRight, LogOut, Menu, Monitor, Moon, Sun } from 'lucide-react'
+import { LogOut, Menu, Monitor, Moon, Sun } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { AppSidebar, type SidebarContext } from '@/components/AppSidebar'
@@ -91,32 +91,6 @@ function useSidebarContext(): SidebarContext {
   return {}
 }
 
-function Breadcrumb({ context }: { context: SidebarContext }) {
-  const { project, crawl } = context
-  const parts: [string, string][] = [['/', 'Projets']]
-  if (project) parts.push([`/projects/${project.id}`, project.name])
-  if (crawl) parts.push([`/crawls/${crawl.id}`, `Audit #${crawl.id}`])
-  return (
-    <nav aria-label="Fil d’Ariane" className="min-w-0">
-      <ol className="flex min-w-0 items-center gap-1 text-sm">
-        {parts.map(([to, label], i) => {
-          const last = i === parts.length - 1
-          return (
-            <li key={to} className={cn('flex min-w-0 items-center gap-1', !last && 'max-sm:hidden')}>
-              {i > 0 && <ChevronRight className="size-3.5 shrink-0 text-muted-foreground max-sm:hidden" aria-hidden />}
-              {last ? (
-                <span aria-current="page" className="truncate font-semibold">{label}</span>
-              ) : (
-                <Link to={to} className="truncate text-muted-foreground hover:text-foreground">{label}</Link>
-              )}
-            </li>
-          )
-        })}
-      </ol>
-    </nav>
-  )
-}
-
 export function Layout() {
   // L'écran d'un audit est un poste de travail (rapports, tableau, inspecteur) : il prend toute la largeur.
   const wide = useMatch('/crawls/:id') !== null
@@ -125,6 +99,16 @@ export function Layout() {
   const [stored, setStored] = useState(storedCollapsed)
   const collapsed = stored ?? wide
   const drawer = useRef<HTMLDialogElement>(null)
+  const footer = (
+    <div className="flex flex-wrap items-center gap-2 px-1">
+      <ThemeToggle />
+      {/* En desktop l'API n'écoute sur aucun port : pas de connexion. */}
+      {!isDesktop && <LogoutButton />}
+      <span className="ml-auto">
+        <ServerVersion />
+      </span>
+    </div>
+  )
   const toggle = () => {
     setStored(!collapsed)
     try {
@@ -142,7 +126,7 @@ export function Layout() {
       >
         Aller au contenu
       </a>
-      <AppSidebar context={context} collapsed={collapsed} onToggle={toggle} className="sticky top-0 hidden h-svh shrink-0 overflow-y-auto lg:flex" />
+      <AppSidebar context={context} collapsed={collapsed} onToggle={toggle} footer={footer} className="sticky top-0 hidden h-svh shrink-0 overflow-y-auto lg:flex" />
       {/* Tiroir mobile : <dialog> modal (focus piégé, Échap) ; se ferme aussi sur le fond ou en suivant un lien. */}
       <dialog
         ref={drawer}
@@ -150,25 +134,18 @@ export function Layout() {
         className="m-0 h-full max-h-none overscroll-contain bg-transparent p-0 backdrop:bg-foreground/30 lg:hidden"
         onClick={(e) => (e.target === e.currentTarget || (e.target as HTMLElement).closest('a')) && drawer.current?.close()}
       >
-        <AppSidebar context={context} collapsed={false} className="h-full overflow-y-auto" />
+        <AppSidebar context={context} collapsed={false} footer={footer} className="h-full overflow-y-auto" />
       </dialog>
       <div className={cn('flex min-w-0 flex-1 flex-col', wide && 'lg:min-h-0')}>
-        <header className="sticky top-0 z-20 shrink-0 border-b border-line bg-card/90 backdrop-blur">
-          <div className={cn('mx-auto flex items-center gap-3 px-4 py-2.5', wide ? 'max-w-none' : 'max-w-7xl')}>
-            <Button variant="ghost" size="icon-sm" className="lg:hidden" aria-label="Ouvrir la navigation" aria-haspopup="dialog" onClick={() => drawer.current?.showModal()}>
-              <Menu aria-hidden />
-            </Button>
-            <Breadcrumb context={context} />
-            <div className="ml-auto flex shrink-0 items-center gap-2">
-              <ServerVersion />
-              <ThemeToggle />
-              {/* En desktop l'API n'écoute sur aucun port : pas de connexion. */}
-              {!isDesktop && <LogoutButton />}
-            </div>
-          </div>
+        {/* Grand écran : la barre latérale situe la page (projet, section) ; ici seulement le menu mobile. */}
+        <header className="sticky top-0 z-20 flex shrink-0 items-center gap-2 border-b border-line bg-card/90 px-4 py-2 backdrop-blur lg:hidden">
+          <Button variant="ghost" size="icon-sm" aria-label="Ouvrir la navigation" aria-haspopup="dialog" onClick={() => drawer.current?.showModal()}>
+            <Menu aria-hidden />
+          </Button>
+          <Link to="/" className="font-heading font-extrabold tracking-tight">CallistSEO</Link>
         </header>
         {isDesktop && <UpdateBanner />}
-        <main id="contenu" tabIndex={-1} className={cn('outline-none', 'mx-auto w-full px-4', wide ? 'py-4 lg:min-h-0 lg:flex-1' : 'max-w-7xl py-8')}>
+        <main id="contenu" tabIndex={-1} className={cn('outline-none', 'mx-auto w-full px-4', wide ? 'py-4 lg:min-h-0 lg:flex-1' : 'max-w-7xl py-8 lg:px-10')}>
           <Outlet />
         </main>
       </div>

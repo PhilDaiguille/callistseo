@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
+import { ArrowLeft } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { RunBadge } from '@/components/Badges'
 import { PageSkeleton } from '@/components/Skeleton'
@@ -97,6 +98,10 @@ export function CrawlPage() {
     <div className="flex flex-col gap-4 lg:h-full lg:min-h-0">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
+          {/* Remplace le fil d'Ariane : retour vers l'historique du projet. */}
+          <Link to={`/projects/${c.project_id}`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="size-3.5" aria-hidden /> {c.project}
+          </Link>
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-extrabold tracking-tight">Audit #{c.id}</h1>
             <RunBadge status={c.status} />
